@@ -8,7 +8,7 @@ let supabase = null;
 
 async function initSupabase() {
     try {
-        const res = await fetch('http://localhost:3000/api/config');
+        const res = await fetch('/api/config');
         const config = await res.json();
         // Since we are also adding SUPABASE keys to the backend config
         if (config.supabaseUrl && config.supabaseKey) {
@@ -86,7 +86,7 @@ async function loadSettings() {
 
     // Try to load keys from backend first, fallback to localStorage
     try {
-        const res = await fetch('http://localhost:3000/api/config');
+        const res = await fetch('/api/config');
         if (res.ok) {
             const envKeys = await res.json();
             
