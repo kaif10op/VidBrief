@@ -1,4 +1,25 @@
 import './style.css'
+import { createClient } from '@supabase/supabase-js'
+
+// --- Supabase Initialization ---
+// These will be exposed via the backend config to avoid leaking into the bundle directly if needed, 
+// but for Vite we can use env vars or fetched config.
+let supabase = null;
+
+async function initSupabase() {
+    try {
+        const res = await fetch('http://localhost:3000/api/config');
+        const config = await res.json();
+        // Since we are also adding SUPABASE keys to the backend config
+        if (config.supabaseUrl && config.supabaseKey) {
+            supabase = createClient(config.supabaseUrl, config.supabaseKey);
+            checkUser();
+        }
+    } catch(e) {
+        console.error("Supabase init failed", e);
+    }
+}
+initSupabase();
 
 // --- State Management & DOM Elements ---
 const views = {
@@ -13,6 +34,7 @@ let chatHistory = [];
 
 // Settings Elements
 const btnSettings = document.getElementById('btn-settings');
+const btnSignIn = document.getElementById('btn-sign-in');
 const settingsModal = document.getElementById('settings-modal');
 const btnCloseModal = document.getElementById('btn-close-modal');
 const btnSaveKey = document.getElementById('btn-save-key');
@@ -25,6 +47,22 @@ const keys = {
     cerebras: document.getElementById('cerebras-key-input'),
     xai: document.getElementById('xai-key-input')
 }
+
+// Auth Elements
+const authModal = document.getElementById('auth-modal');
+const authForm = document.getElementById('auth-form');
+const authTitle = document.getElementById('auth-title');
+const authDesc = document.getElementById('auth-desc');
+const authEmail = document.getElementById('auth-email');
+const authPassword = document.getElementById('auth-password');
+const authSubmitBtn = document.getElementById('btn-auth-submit');
+const authSwitchLink = document.getElementById('auth-switch-link');
+const authSwitchText = document.getElementById('auth-switch-text');
+const btnCloseAuth = document.getElementById('btn-close-auth');
+const btnLogout = document.getElementById('btn-logout');
+
+let isSignUp = false;
+let currentUser = null;
 
 // Landing Elements
 const urlForm = document.getElementById('url-form');
@@ -53,7 +91,7 @@ async function loadSettings() {
             const envKeys = await res.json();
             
             Object.keys(keys).forEach(k => {
-                // Precedence: localStorage > .env server config (if empty)
+                // Precedence: Supabase DB > localStorage > .env server config (if empty)
                 const savedKey = localStorage.getItem(`vidbrief_${k}_key`);
                 if (savedKey) {
                     keys[k].value = savedKey;
@@ -63,6 +101,25 @@ async function loadSettings() {
                     localStorage.setItem(`vidbrief_${k}_key`, envKeys[k]);
                 }
             });
+
+            // If user is logged in, try to fetch from Supabase table
+            if (currentUser) {
+                const { data, error } = await supabase
+                    .from('user_configs')
+                    .select('*')
+                    .eq('id', currentUser.id)
+                    .single();
+
+                if (data) {
+                    providerSelect.value = data.provider || providerSelect.value;
+                    Object.keys(keys).forEach(k => {
+                        if (data[`${k}_key`]) {
+                            keys[k].value = data[`${k}_key`];
+                            localStorage.setItem(`vidbrief_${k}_key`, data[`${k}_key`]);
+                        }
+                    });
+                }
+            }
         }
     } catch (e) {
         console.warn("Could not load backend config, falling back to pure localStorage", e);
@@ -75,17 +132,103 @@ async function loadSettings() {
 loadSettings();
 
 // --- Modal Logic ---
-btnSettings.addEventListener('click', () => settingsModal.classList.remove('hidden'));
-btnCloseModal.addEventListener('click', () => settingsModal.classList.add('hidden'));
+btnSettings?.addEventListener('click', () => settingsModal?.classList.remove('hidden'));
+btnCloseModal?.addEventListener('click', () => settingsModal?.classList.add('hidden'));
 
-btnSaveKey.addEventListener('click', () => {
+btnSaveKey.addEventListener('click', async () => {
     localStorage.setItem('vidbrief_provider', providerSelect.value);
+    const configData = { provider: providerSelect.value };
+    
     Object.keys(keys).forEach(k => {
-        localStorage.setItem(`vidbrief_${k}_key`, keys[k].value.trim());
+        const val = keys[k].value.trim();
+        localStorage.setItem(`vidbrief_${k}_key`, val);
+        configData[`${k}_key`] = val;
     });
+
+    if (currentUser) {
+        const { error } = await supabase
+            .from('user_configs')
+            .upsert({ id: currentUser.id, ...configData });
+        
+        if (error) console.error("Failed to sync to Supabase:", error);
+    }
     
     settingsModal.classList.add('hidden');
-    alert("Configuration saved securely to localStorage.");
+    alert("Configuration saved securely.");
+});
+
+// --- Auth Logic ---
+async function checkUser() {
+    if (!supabase) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    currentUser = user;
+    
+    if (user) {
+        btnSignIn.classList.add('hidden');
+        btnLogout.classList.remove('hidden');
+        // Reload settings for this user
+        loadSettings();
+    } else {
+        btnSignIn.classList.remove('hidden');
+        btnLogout.classList.add('hidden');
+    }
+}
+
+btnSignIn?.addEventListener('click', () => {
+    authModal?.classList.remove('hidden');
+});
+
+btnCloseAuth?.addEventListener('click', () => {
+    authModal?.classList.add('hidden');
+});
+
+btnLogout?.addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    currentUser = null;
+    checkUser();
+    alert("Logged out successfully.");
+});
+
+authSwitchLink?.addEventListener('click', (e) => {
+    e.preventDefault();
+    isSignUp = !isSignUp;
+    authTitle.textContent = isSignUp ? "Sign Up" : "Sign In";
+    authDesc.textContent = isSignUp ? "Create an account to sync your settings." : "Login to sync your API keys across devices.";
+    authSubmitBtn.textContent = isSignUp ? "Sign Up" : "Sign In";
+    authSwitchText.textContent = isSignUp ? "Already have an account?" : "Don't have an account?";
+    authSwitchLink.textContent = isSignUp ? "Sign In" : "Sign Up";
+});
+
+authForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = authEmail.value;
+    const password = authPassword.value;
+    
+    authSubmitBtn.disabled = true;
+    authSubmitBtn.textContent = isSignUp ? "Creating account..." : "Signing in...";
+    
+    try {
+        let result;
+        if (isSignUp) {
+            result = await supabase.auth.signUp({ email, password });
+        } else {
+            result = await supabase.auth.signInWithPassword({ email, password });
+        }
+        
+        if (result.error) throw result.error;
+        
+        if (isSignUp) {
+            alert("Signup successful! Please check your email for verification.");
+        } else {
+            authModal.classList.add('hidden');
+            checkUser();
+        }
+    } catch(err) {
+        alert(err.message);
+    } finally {
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = isSignUp ? "Sign Up" : "Sign In";
+    }
 });
 
 // --- View Navigation Logic ---
@@ -155,7 +298,7 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
             url = 'https://api.cerebras.ai/v1/chat/completions';
             headers['Authorization'] = `Bearer ${apiKey}`;
             body = {
-                model: 'llama3.1-70b',
+                model: 'llama3.1-8b',
                 messages: messages
             };
             break;
@@ -163,7 +306,7 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
             url = 'https://api.x.ai/v1/chat/completions';
             headers['Authorization'] = `Bearer ${apiKey}`;
             body = {
-                model: 'grok-beta',
+                model: 'grok-2-latest',
                 messages: messages
             };
             break;
@@ -177,7 +320,8 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
             
             let geminiMessages = userMessages.map(m => {
                 let r = m.role === 'assistant' ? 'model' : m.role;
-                return { role: r, parts: m.parts }
+                // Deep copy parts to prevent mutating the original msg object in fallbacks
+                return { role: r, parts: [{ text: m.parts[0].text }] }
             });
 
             if (geminiMessages.length > 0) {
@@ -348,7 +492,11 @@ async function processVideoUrl(url) {
 
     } catch (err) {
         console.error(err);
-        alert(`Failed to analyze video:\n${err.message}`);
+        const errorDiv = document.getElementById('error-message') || document.createElement('div');
+        errorDiv.id = 'error-message';
+        errorDiv.className = 'error-banner';
+        errorDiv.innerText = `Error: ${err.message}`;
+        urlForm.parentNode.insertBefore(errorDiv, urlForm);
         showView('landing');
     }
 }

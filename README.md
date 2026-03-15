@@ -9,6 +9,8 @@ Just paste a YouTube URL and let the AI do the heavy lifting for you!
 - **Instant YouTube Transcripts**: Extracts subtitles directly from YouTube videos (supports both manual and auto-generated English captions).
 - **AI-Powered Summaries**: Generates high-quality summaries of the video content.
 - **Key Highlights Extraction**: Pulls out the most important points and takeaways.
+- **Supabase Integration**: Securely store your AI API keys and synchronize them across devices.
+- **User Authentication**: Sign Up / Sign In flow to manage your personal configurations.
 - **Multiple AI Providers Supported**: 
   - Google Gemini
   - Groq
@@ -22,6 +24,7 @@ Just paste a YouTube URL and let the AI do the heavy lifting for you!
 
 - **Frontend**: HTML5, CSS3, Vanilla JavaScript (Vite for bundling)
 - **Backend**: Node.js, Express.js
+- **Database / Auth**: Supabase
 - **Transcript Extraction**: `yt-dlp` (via `child_process`)
 - **AI Integration**: `@google/generative-ai` and REST APIs for other providers
 
@@ -52,6 +55,10 @@ Just paste a YouTube URL and let the AI do the heavy lifting for you!
    OPENROUTER_API_KEY=your_openrouter_api_key_here
    CEREBRAS_API_KEY=your_cerebras_api_key_here
    XAI_API_KEY=your_xai_api_key_here
+   
+   # Supabase (required for Auth & Sync)
+   SUPABASE_URL=your_supabase_url_here
+   SUPABASE_ANON_KEY=your_supabase_anon_key_here
    ```
    *Note: You only need to provide keys for the AI services you intend to use.*
 

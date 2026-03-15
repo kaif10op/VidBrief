@@ -1,3 +1,7 @@
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px;
+}
 :root {
   /* Core Colors */
   --bg-dark: #09090b;
@@ -1001,6 +1005,7 @@ button {
   background: rgba(255,255,255,0.2);
 }
 
+
 /* Responsive */
 @media (max-width: 768px) {
   .hero h1 { font-size: 2.5rem; }
@@ -1009,6 +1014,10 @@ button {
   .tabs { overflow-x: auto; padding-bottom: 0.5rem; }
   .tabs::-webkit-scrollbar { height: 0; }
   .tab-btn { white-space: nowrap; }
+  .features-grid { grid-template-columns: 1fr; }
+  .steps-grid { flex-direction: column; }
+  .step-connector { transform: rotate(90deg); }
+  .nav-links a { display: none; }
 }
 
 /* Utility */
@@ -1016,65 +1025,141 @@ button {
   display: none !important;
 }
 
-/* Modal Styling */
-.modal-overlay {
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
-  z-index: 1000;
+/* ===== Landing Sections (Features & How It Works) ===== */
+.landing-section {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 3rem 0;
+}
+
+.section-heading {
+  font-family: var(--font-display);
+  font-size: 2.5rem;
+  text-align: center;
+  margin-bottom: 0.75rem;
+  letter-spacing: -1px;
+}
+
+.section-subheading {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  max-width: 600px;
+  margin: 0 auto 2.5rem;
+}
+
+/* Features Grid */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.feature-card {
+  padding: 2rem;
+  border-radius: var(--radius-lg);
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+  text-align: left;
+}
+
+.feature-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 40px rgba(138, 43, 226, 0.15);
+  border-color: rgba(138, 43, 226, 0.3);
+}
+
+.feature-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--accent-gradient);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  overflow-y: auto;
+  margin-bottom: 1.25rem;
+  color: white;
 }
-.modal-overlay.hidden {
-  display: none !important;
-}
-.modal-content {
-  width: 100%;
-  max-width: 500px;
-  border-radius: var(--radius-lg);
-  padding: 2rem;
-  position: relative;
-  margin: auto;
-}
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-}
-.modal-header h2 {
+
+.feature-card h3 {
   font-family: var(--font-display);
-  font-size: 1.5rem;
-}
-#btn-close-modal {
-  margin-left: auto;
-}
-.modal-body {
-  margin-bottom: 2rem;
-}
-.modal-desc {
-  color: var(--text-muted);
-  font-size: 0.95rem;
-  margin-bottom: 1.5rem;
-}
-.modal-helper {
-  font-size: 0.85rem;
-  margin-top: 0.5rem;
-}
-.modal-helper a {
-  color: #dfb6ff;
-  text-decoration: underline;
-}
-.modal-helper a:hover {
-  color: #f8fafc;
-}
-.form-group label {
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
   color: var(--text-main);
 }
 
+.feature-card p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+/* Steps Grid */
+.steps-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.step-card {
+  padding: 2rem;
+  border-radius: var(--radius-lg);
+  text-align: center;
+  flex: 1;
+  max-width: 280px;
+  transition: transform var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.step-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 12px 40px rgba(138, 43, 226, 0.15);
+  border-color: rgba(138, 43, 226, 0.3);
+}
+
+.step-number {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  color: white;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.25rem;
+  box-shadow: 0 4px 20px rgba(138, 43, 226, 0.3);
+}
+
+.step-card h3 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-main);
+}
+
+.step-card p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.step-connector {
+  color: var(--accent-primary);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* Error Banner */
+.error-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  padding: 1rem;
+  border-radius: var(--radius-md);
+  margin-bottom: 2rem;
+  font-weight: 500;
+  text-align: left;
+}

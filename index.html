@@ -32,7 +32,7 @@
            <button class="btn-icon" id="btn-settings" aria-label="Settings" title="Configure API Key">
              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
            </button>
-           <button class="btn-outline">Sign In</button>
+           <button class="btn-outline" id="btn-sign-in">Sign In</button>
         </div>
       </header>
 
@@ -92,6 +92,38 @@
           </div>
         </div>
       </div>
+      
+      <!-- Auth Modal -->
+      <div id="auth-modal" class="modal-overlay hidden">
+        <div class="modal-content frosted-glass fade-in">
+          <div class="modal-header">
+            <h2 id="auth-title">Sign In</h2>
+            <button class="btn-icon" id="btn-close-auth">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p id="auth-desc" class="modal-desc">Login to sync your API keys across devices.</p>
+            
+            <form id="auth-form">
+              <div class="form-group" style="margin-bottom: 1rem;">
+                <label for="auth-email">Email Address</label>
+                <input type="email" id="auth-email" placeholder="email@example.com" class="search-input" style="width:100%; margin-top:0.5rem;" required />
+              </div>
+              <div class="form-group" style="margin-bottom: 1.5rem;">
+                <label for="auth-password">Password</label>
+                <input type="password" id="auth-password" placeholder="••••••••" class="search-input" style="width:100%; margin-top:0.5rem;" required />
+              </div>
+              <button type="submit" id="btn-auth-submit" class="btn-primary" style="width: 100%;">Sign In</button>
+            </form>
+            
+            <p class="modal-helper" style="text-align: center; margin-top: 1.5rem;">
+              <span id="auth-switch-text">Don't have an account?</span> 
+              <a href="#" id="auth-switch-link">Sign Up</a>
+            </p>
+          </div>
+        </div>
+      </div>
 
       <!-- View 1: Landing/Input -->
       <section id="landing-view" class="view active fade-in">
@@ -123,6 +155,71 @@
               <span>Ready to analyze</span>
            </div>
         </div>
+
+        <!-- Features Section -->
+        <section id="features" class="landing-section">
+          <h2 class="section-heading gradient-text">Powerful Features</h2>
+          <p class="section-subheading">Everything you need to extract insights from any YouTube video in seconds.</p>
+          <div class="features-grid">
+            <div class="feature-card frosted-glass">
+              <div class="feature-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              </div>
+              <h3>AI Summaries</h3>
+              <p>Get comprehensive executive summaries powered by leading AI models like Groq, Gemini, and more.</p>
+            </div>
+            <div class="feature-card frosted-glass">
+              <div class="feature-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
+              </div>
+              <h3>Key Highlights</h3>
+              <p>Instantly extract the most important bullet-point takeaways from any video — no more scrubbing through hours of content.</p>
+            </div>
+            <div class="feature-card frosted-glass">
+              <div class="feature-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              </div>
+              <h3>Searchable Transcript</h3>
+              <p>Full timestamped transcripts with instant search. Find exactly the moment you're looking for in seconds.</p>
+            </div>
+            <div class="feature-card frosted-glass">
+              <div class="feature-icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              </div>
+              <h3>AI Chat</h3>
+              <p>Ask follow-up questions about the video and get instant, context-aware answers from your AI assistant.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- How It Works Section -->
+        <section id="how-it-works" class="landing-section">
+          <h2 class="section-heading gradient-text">How It Works</h2>
+          <p class="section-subheading">Three simple steps to unlock the knowledge inside any YouTube video.</p>
+          <div class="steps-grid">
+            <div class="step-card frosted-glass">
+              <div class="step-number">1</div>
+              <h3>Paste a Link</h3>
+              <p>Copy any YouTube video URL and paste it into VidBrief's search bar above.</p>
+            </div>
+            <div class="step-connector">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </div>
+            <div class="step-card frosted-glass">
+              <div class="step-number">2</div>
+              <h3>AI Analyzes</h3>
+              <p>Our AI fetches the transcript and processes it with advanced language models to generate insights.</p>
+            </div>
+            <div class="step-connector">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </div>
+            <div class="step-card frosted-glass">
+              <div class="step-number">3</div>
+              <h3>Get Results</h3>
+              <p>Browse the summary, highlights, and full transcript — or chat with AI to ask specific questions.</p>
+            </div>
+          </div>
+        </section>
       </section>
 
       <!-- View 2: Loading State -->
