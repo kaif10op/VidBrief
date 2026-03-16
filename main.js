@@ -50,6 +50,7 @@ const btnSaveKey = document.getElementById('btn-save-key');
 const providerSelect = document.getElementById('provider-select');
 const keys = {
     openrouter: document.getElementById('openrouter-key-input'),
+    openai: document.getElementById('openai-key-input'),
     groq: document.getElementById('groq-key-input'),
     gemini: document.getElementById('gemini-key-input'),
     cerebras: document.getElementById('cerebras-key-input'),
@@ -254,7 +255,11 @@ function showView(viewName) {
 // --- Local Backend Fetch Logic ---
 async function fetchTranscriptFromBackend(url) {
     try {
-        const response = await fetch(`http://localhost:3000/api/transcript?url=${encodeURIComponent(url)}`);
+        const response = await fetch('/api/transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
         const data = await response.json();
         
         if (!data.success) {
@@ -291,6 +296,14 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
             headers['Authorization'] = `Bearer ${apiKey}`;
             body = {
                 model: 'meta-llama/llama-3.3-70b-instruct:free',
+                messages: messages
+            };
+            break;
+        case 'openai':
+            url = 'https://api.openai.com/v1/chat/completions';
+            headers['Authorization'] = `Bearer ${apiKey}`;
+            body = {
+                model: 'gpt-4o-mini',
                 messages: messages
             };
             break;
@@ -362,7 +375,7 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
 
 async function generateAIContent(systemPrompt, userMessages) {
     const selectedProvider = localStorage.getItem('vidbrief_provider') || 'openrouter';
-    const allProviders = ['openrouter', 'groq', 'cerebras', 'gemini', 'xai'];
+    const allProviders = ['openrouter', 'openai', 'groq', 'cerebras', 'gemini', 'xai'];
     
     // Put selected provider first, then the rest
     const fallbackQueue = [selectedProvider, ...allProviders.filter(p => p !== selectedProvider)];

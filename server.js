@@ -24,6 +24,7 @@ app.get('/api/config', (req, res) => {
         gemini: process.env.GOOGLE_AI_KEY || '',
         cerebras: process.env.CEREBRAS_API_KEY || '',
         xai: process.env.XAI_API_KEY || '',
+        openai: process.env.OPENAI_API_KEY || '',
         supabaseUrl: process.env.SUPABASE_URL || '',
         supabaseKey: process.env.SUPABASE_ANON_KEY || ''
     });

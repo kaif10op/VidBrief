@@ -27,6 +27,9 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <!-- Noise Texture Overlay -->
+    <div class="noise-overlay"></div>
+
     <!-- App Container -->
     <div id="app">
       <!-- Background Effects -->
@@ -66,6 +69,7 @@
               <label for="provider-select">Active AI Provider</label>
               <select id="provider-select" class="search-input" style="width:100%; margin-top:0.5rem; background: rgba(0,0,0,0.5);">
                 <option value="openrouter">OpenRouter (Llama 3.3 70B)</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
                 <option value="groq">Groq (Llama 3.3 70B)</option>
                 <option value="gemini">Google Gemini (1.5 Flash)</option>
                 <option value="cerebras">Cerebras (Llama 3.1 70B)</option>
@@ -94,6 +98,12 @@
             <div class="form-group" style="margin-bottom: 1rem;">
               <label for="cerebras-key-input">Cerebras API Key</label>
               <input type="password" id="cerebras-key-input" placeholder="csk-..." class="search-input" style="width:100%; margin-top:0.5rem;" />
+            </div>
+
+            <div class="form-group" style="margin-bottom: 1rem;">
+              <label for="openai-key-input">OpenAI API Key</label>
+              <input type="password" id="openai-key-input" placeholder="sk-proj-..." class="search-input" style="width:100%; margin-top:0.5rem;" />
+              <p class="modal-helper"><a href="https://platform.openai.com/api-keys" target="_blank">Get OpenAI key.</a></p>
             </div>
 
             <div class="form-group">
@@ -143,7 +153,7 @@
       <section id="landing-view" class="view active fade-in">
         <div class="hero">
           <div class="badge glow-effect">✨ Discover insights 10x faster</div>
-          <h1>Unlock the knowledge of<br><span class="gradient-text">YouTube</span> instantly.</h1>
+          <h1>Unlock the knowledge of<br><span class="animate-gradient-text">YouTube</span> instantly.</h1>
           <p class="subtitle">Get comprehensive executive summaries, detailed key highlights, full searchable transcripts, and chat with AI about any video.</p>
           
           <form id="url-form" class="input-group frosted-glass">
