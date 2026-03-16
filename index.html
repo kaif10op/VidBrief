@@ -4,8 +4,22 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a2be2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='23 7 16 12 23 17 23 7'/%3E%3Crect x='1' y='5' width='15' height='14' rx='2' ry='2'/%3E%3C/svg%3E" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="VidBrief AI - Summarize any YouTube video instantly." />
-    <title>VidBrief - AI YouTube Summarizer</title>
+    <meta name="description" content="VidBrief AI — Summarize any YouTube video instantly with AI-powered summaries, key highlights, searchable transcripts, and interactive chat." />
+    <meta name="keywords" content="YouTube summarizer, AI summary, video highlights, transcript search, AI chat, video analysis" />
+    <meta name="author" content="VidBrief AI" />
+    <meta name="theme-color" content="#8a2be2" />
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="VidBrief AI — Unlock YouTube Knowledge Instantly" />
+    <meta property="og:description" content="Get comprehensive AI summaries, key highlights, searchable transcripts, and chat about any YouTube video." />
+    <meta property="og:url" content="https://vidbrief.ai" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="VidBrief AI — Unlock YouTube Knowledge Instantly" />
+    <meta name="twitter:description" content="AI-powered YouTube video summarizer with chat, highlights, and transcript search." />
+
+    <title>VidBrief AI — Summarize YouTube Videos Instantly</title>
+
     <!-- Modern Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,25 +29,25 @@
   <body>
     <!-- App Container -->
     <div id="app">
-      <!-- Background Elements -->
+      <!-- Background Effects -->
       <div class="bg-shape shape-1"></div>
       <div class="bg-shape shape-2"></div>
       <div class="bg-grid"></div>
 
       <!-- Header / Nav -->
-      <header class="top-nav">
+      <header class="top-nav" id="top-nav">
         <div class="logo">
            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" class="brand-icon" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
            <span>VidBrief AI</span>
         </div>
-        <div class="nav-links">
+        <nav class="nav-links" aria-label="Main navigation">
            <a href="#features">Features</a>
            <a href="#how-it-works">How It Works</a>
            <button class="btn-icon" id="btn-settings" aria-label="Settings" title="Configure API Key">
              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
            </button>
            <button class="btn-outline" id="btn-sign-in">Sign In</button>
-        </div>
+        </nav>
       </header>
 
       <!-- API Key Modal -->
@@ -149,12 +163,24 @@
         </div>
 
         <div class="demo-preview frosted-glass slide-up">
-           <img src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" alt="App Preview" class="preview-img" style="opacity: 0.8; mix-blend-mode: overlay;"/>
+           <img src="https://images.unsplash.com/photo-1611162617474-5b21e879e113?ixlib=rb-4.0.3&auto=format&fit=crop&w=1000&q=80" alt="VidBrief AI Dashboard Preview showing video analysis results" class="preview-img" style="opacity: 0.8; mix-blend-mode: overlay;"/>
            <div class="preview-overlay">
               <div class="pulsing-circle"></div>
               <span>Ready to analyze</span>
            </div>
         </div>
+
+        <!-- Trusted By / Social Proof -->
+        <section class="social-proof">
+          <p class="proof-label">Powered by leading AI models</p>
+          <div class="proof-logos">
+            <span class="proof-item">🧠 Groq</span>
+            <span class="proof-item">✨ Gemini</span>
+            <span class="proof-item">🚀 OpenRouter</span>
+            <span class="proof-item">⚡ Cerebras</span>
+            <span class="proof-item">🤖 xAI Grok</span>
+          </div>
+        </section>
 
         <!-- Features Section -->
         <section id="features" class="landing-section">
@@ -220,6 +246,17 @@
             </div>
           </div>
         </section>
+
+        <!-- Footer -->
+        <footer class="site-footer">
+          <div class="footer-content">
+            <div class="footer-brand">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+              <span>VidBrief AI</span>
+            </div>
+            <p class="footer-text">Built with ❤️ — Summarize smarter, not harder.</p>
+          </div>
+        </footer>
       </section>
 
       <!-- View 2: Loading State -->

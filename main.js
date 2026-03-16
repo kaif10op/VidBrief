@@ -1,6 +1,14 @@
 import './style.css'
 import { createClient } from '@supabase/supabase-js'
 
+// --- Sticky Nav Scroll Effect ---
+const topNav = document.getElementById('top-nav');
+if (topNav) {
+  window.addEventListener('scroll', () => {
+    topNav.classList.toggle('scrolled', window.scrollY > 20);
+  }, { passive: true });
+}
+
 // --- Supabase Initialization ---
 // These will be exposed via the backend config to avoid leaking into the bundle directly if needed, 
 // but for Vite we can use env vars or fetched config.
