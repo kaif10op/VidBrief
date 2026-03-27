@@ -120,17 +120,27 @@ app.post('/api/transcript', async (req, res) => {
             };
             
             // Try manual subs first, then auto-captions
+            // Priority: Manual English > Auto English > Manual any > Auto any
+            const englishVariants = ['en', 'en-US', 'en-GB', 'en-orig'];
+            
+            // Phase 1: Try English first across all sources
             for (const source of [subs, autoCaptions]) {
                 if (Object.keys(source).length === 0) continue;
-                
-                // Try English first
-                let track = pickTrack(source, 'en');
-                if (track) { subUrl = track.url; subLang = 'en'; break; }
-                
-                // Try any available language
-                const firstLang = Object.keys(source)[0];
-                track = pickTrack(source, firstLang);
-                if (track) { subUrl = track.url; subLang = firstLang; break; }
+                for (const lang of englishVariants) {
+                    let track = pickTrack(source, lang);
+                    if (track) { subUrl = track.url; subLang = lang; break; }
+                }
+                if (subUrl) break;
+            }
+            
+            // Phase 2: If no English found, take the first available language
+            if (!subUrl) {
+                for (const source of [subs, autoCaptions]) {
+                    if (Object.keys(source).length === 0) continue;
+                    const firstLang = Object.keys(source)[0];
+                    let track = pickTrack(source, firstLang);
+                    if (track) { subUrl = track.url; subLang = firstLang; break; }
+                }
             }
             
             if (subUrl) {

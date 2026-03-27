@@ -69,12 +69,10 @@
             <div class="form-group" style="margin-bottom: 1.5rem;">
               <label for="provider-select">Active AI Provider</label>
               <select id="provider-select" class="search-input" style="width:100%; margin-top:0.5rem; background: rgba(0,0,0,0.5);">
-                <option value="openrouter">OpenRouter (Llama 3.3 70B)</option>
-                <option value="openai">OpenAI (GPT-4o)</option>
-                <option value="groq">Groq (Llama 3.3 70B)</option>
-                <option value="gemini">Google Gemini (1.5 Flash)</option>
-                <option value="cerebras">Cerebras (Llama 3.1 70B)</option>
-                <option value="xai">xAI (Grok)</option>
+                <option value="groq">Groq (Llama 3.3 70B) — Fast</option>
+                <option value="openrouter">OpenRouter (Llama 3.3 70B) — Free</option>
+                <option value="gemini">Google Gemini (2.0 Flash) — Free</option>
+                <option value="cerebras">Cerebras (Llama 3.1 8B) — Fastest</option>
               </select>
             </div>
 
@@ -357,7 +355,12 @@
             <div class="tab-content-wrapper">
               <div class="tab-content active" id="tab-summary">
                   <div class="content-box">
-                    <h3 class="section-title">Executive Summary</h3>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                      <h3 class="section-title" style="margin:0;">Executive Summary</h3>
+                      <button id="btn-copy-summary" class="btn-icon" title="Copy summary" style="opacity:0.6;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                      </button>
+                    </div>
                     <div id="summary-text" class="text-content"></div>
                   </div>
               </div>
@@ -372,7 +375,12 @@
 
               <div class="tab-content hidden" id="tab-highlights">
                   <div class="content-box">
-                    <h3 class="section-title">Key Takeaways</h3>
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+                      <h3 class="section-title" style="margin:0;">Key Takeaways</h3>
+                      <button id="btn-copy-highlights" class="btn-icon" title="Copy highlights" style="opacity:0.6;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                      </button>
+                    </div>
                     <ul id="highlights-list" class="styled-list">
                     </ul>
                   </div>
@@ -381,8 +389,21 @@
               <div class="tab-content hidden" id="tab-transcript">
                   <div class="content-box transcript-box">
                     <div class="transcript-header">
-                      <h3 class="section-title">Full Transcript</h3>
-                      <div class="search-wrapper">
+                      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                          <h3 class="section-title" style="margin:0;">Full Transcript</h3>
+                          <span id="transcript-stats" style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;"></span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                          <button id="btn-download-transcript" class="btn-icon" title="Download transcript" style="opacity:0.6;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                          </button>
+                          <button id="btn-copy-transcript" class="btn-icon" title="Copy transcript" style="opacity:0.6;transition:opacity 0.2s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="search-wrapper" style="margin-top:8px;">
                         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <input type="text" id="transcript-search" class="search-input" placeholder="Search transcript..." />
                       </div>

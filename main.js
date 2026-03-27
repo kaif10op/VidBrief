@@ -433,6 +433,14 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
     }
 }
 
+// Provider-specific max character limits (to respect TPM/context limits)
+const PROVIDER_MAX_CHARS = {
+    groq: 10000,
+    openrouter: 50000,
+    gemini: 50000,
+    cerebras: 6000
+};
+
 async function generateAIContent(systemPrompt, userMessages) {
     const selectedProvider = localStorage.getItem('vidbrief_provider') || 'openrouter';
     const allProviders = ['groq', 'openrouter', 'gemini', 'cerebras'];
@@ -451,26 +459,36 @@ async function generateAIContent(systemPrompt, userMessages) {
         
         triedCount++;
         
-        // Update loading UI slightly if we are falling back
-        if (triedCount > 1) {
-             const stepEl = document.getElementById('loading-step');
-             if (stepEl) {
-                 stepEl.innerText = `Retrying with ${provider}...`;
-             }
+        // Show which provider is being used in the loading UI
+        const stepEl = document.getElementById('loading-step');
+        if (stepEl) {
+            stepEl.innerText = triedCount > 1 
+                ? `Previous provider failed. Retrying with ${provider}...` 
+                : `Generating via ${provider}...`;
         }
 
+        // Auto-truncate messages to fit this provider's limit
+        const maxChars = PROVIDER_MAX_CHARS[provider] || 20000;
+        const sizedMessages = userMessages.map(m => ({
+            ...m,
+            parts: [{ text: m.parts[0].text.substring(0, maxChars) }]
+        }));
+
         try {
-            return await executeAIRequest(provider, apiKey, systemPrompt, userMessages);
+            return await executeAIRequest(provider, apiKey, systemPrompt, sizedMessages);
         } catch (err) {
             console.warn(`Provider ${provider} failed: ${err.message}. Fetching fallback...`);
             lastError = err;
             
-            // On 429 rate limit, wait briefly then continue to next provider
+            // On 429: parse exact retry-after time from error, wait that long, then retry same provider once
             if (err.message.includes('429')) {
-                await new Promise(r => setTimeout(r, 2000));
+                const retryMatch = err.message.match(/try again in ([\d.]+)s/i);
+                const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : 5;
+                console.log(`Rate limited. Waiting ${waitSec}s before trying next provider...`);
+                await new Promise(r => setTimeout(r, waitSec * 1000));
             }
             
-            // On context_length_exceeded, truncate messages and retry same provider once
+            // On context_length_exceeded, truncate hard and retry same provider once
             if (err.message.includes('context_length_exceeded') && !err._retried) {
                 try {
                     const shorterMessages = userMessages.map(m => ({
@@ -515,21 +533,45 @@ async function processVideoUrl(url) {
     setProgress(5, "Fetching video metadata and neural transcript...");
 
     try {
-        // 1. Fetch transcript — auto-cascade to Whisper Audio if captions missing
+        // 1. Fetch transcript — check cache first, then auto-cascade to Whisper Audio if captions missing
         let backendData;
-        try {
-            backendData = await fetchTranscriptFromBackend(url);
-        } catch (transcriptErr) {
-            if (transcriptErr.code === 'NO_TRANSCRIPT_AVAILABLE') {
-                console.warn('No captions found. Automatically falling back to Whisper Audio extraction...');
-                setProgress(10, "No captions detected. Extracting native audio via Whisper AI...");
-                
-                // Try to get Groq key from localStorage or use the backend's .env key
-                const groqKey = localStorage.getItem('vidbrief_groq_key') || '';
-                backendData = await fetchAudioTranscriptFromBackend(url, groqKey);
-                setProgress(30, "Audio transcribed successfully via Groq Whisper AI.");
-            } else {
-                throw transcriptErr; // Re-throw genuine errors
+        
+        // Try sessionStorage cache first (avoids re-fetching same video)
+        const videoIdMatch = url.match(/(?:v=|\/v\/|youtu\.be\/|\/embed\/|\/shorts\/)([a-zA-Z0-9_-]{11})/);
+        const cacheKey = videoIdMatch ? `vidbrief_cache_${videoIdMatch[1]}` : null;
+        
+        if (cacheKey) {
+            const cached = sessionStorage.getItem(cacheKey);
+            if (cached) {
+                try {
+                    backendData = JSON.parse(cached);
+                    console.log('Using cached transcript for', videoIdMatch[1]);
+                    setProgress(30, "Using cached transcript...");
+                } catch(e) {
+                    sessionStorage.removeItem(cacheKey);
+                }
+            }
+        }
+        if (!backendData) {
+            try {
+                backendData = await fetchTranscriptFromBackend(url);
+            } catch (transcriptErr) {
+                if (transcriptErr.code === 'NO_TRANSCRIPT_AVAILABLE') {
+                    console.warn('No captions found. Automatically falling back to Whisper Audio extraction...');
+                    setProgress(10, "No captions detected. Extracting native audio via Whisper AI...");
+                    
+                    // Try to get Groq key from localStorage or use the backend's .env key
+                    const groqKey = localStorage.getItem('vidbrief_groq_key') || '';
+                    backendData = await fetchAudioTranscriptFromBackend(url, groqKey);
+                    setProgress(30, "Audio transcribed successfully via Groq Whisper AI.");
+                } else {
+                    throw transcriptErr; // Re-throw genuine errors
+                }
+            }
+
+            // Cache the successful transcript for this session
+            if (cacheKey && backendData) {
+                try { sessionStorage.setItem(cacheKey, JSON.stringify(backendData)); } catch(e) {}
             }
         }
         
@@ -562,68 +604,110 @@ async function processVideoUrl(url) {
             const m = Math.floor(totalSecs / 60);
             const s = String(totalSecs % 60).padStart(2, '0');
             return `[${m}:${s}] ${t.text}`;
-        }).join('\n').substring(0, 12000);
+        }).join('\n').substring(0, 50000);
 
-        const maxContext = currentTranscriptText.substring(0, 12000); 
+        const maxContext = currentTranscriptText.substring(0, 50000); 
+
+        // --- AI Generation Pipeline (each step is independent) ---
 
         // 2. Generate Summary
-        setProgress(45, "Synthesizing executive summary...");
-        const summaryMsg = [{ role: 'user', parts: [{ text: `Provide a comprehensive executive summary of the following video transcript. The transcript may be in any language — always respond in the SAME language as the transcript. Make it flow well and capture the core essence of the video accurately.\n\nTranscript:\n${maxContext}` }] }];
-        const summaryResult = await generateAIContent(null, summaryMsg);
-        document.getElementById('summary-text').innerText = summaryResult;
-        document.getElementById('summary-tease').innerText = "AI Generated Executive Summary complete.";
-
-        // 3. Generate Chapters with Timestamps
-        setProgress(58, "Generating intelligent video chapters...");
-        const chaptersMsg = [{ role: 'user', parts: [{ text: `Analyze the following timestamped video transcript and generate 5-10 logical chapter markers. Each chapter should represent a distinct topic shift or segment of the video.\n\nReturn ONLY a JSON array of objects with "time" (in "M:SS" format) and "title" (short descriptive title) properties. Respond in the SAME language as the transcript.\n\nExample format: [{"time": "0:00", "title": "Introduction"}, {"time": "2:15", "title": "Main Topic"}]\n\nTimestamped Transcript:\n${timestampedContext}` }] }];
-        const chaptersResult = await generateAIContent(null, chaptersMsg);
-        
-        let chapText = chaptersResult.replace(/```json/g, '').replace(/```/g, '').trim();
-        let chaptersArray = [];
         try {
-            chaptersArray = JSON.parse(chapText);
+            setProgress(40, "Synthesizing executive summary...");
+            const summaryMsg = [{ role: 'user', parts: [{ text: `Provide a comprehensive executive summary of the following video transcript. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only. Make it flow well and capture the core essence of the video accurately.\n\nTranscript:\n${maxContext}` }] }];
+            const summaryResult = await generateAIContent(null, summaryMsg);
+            document.getElementById('summary-text').innerText = summaryResult;
+            document.getElementById('summary-tease').innerText = "AI Generated Executive Summary complete.";
         } catch(e) {
-            // Graceful degradation: parse line-by-line
-            chaptersArray = chapText.split('\n').filter(l => l.trim().length > 0).map(l => {
-                const match = l.match(/(\d+:\d+)\s*[-–:]?\s*(.+)/);
-                return match ? { time: match[1], title: match[2].trim() } : { time: '0:00', title: l.trim() };
-            });
+            console.error("Summary generation failed:", e.message);
+            document.getElementById('summary-text').innerText = "⚠️ Summary generation failed. Please try again or switch AI providers in Settings.";
+            document.getElementById('summary-tease').innerText = "Summary unavailable.";
         }
-        
-        const chList = document.getElementById('chapters-list');
-        chList.innerHTML = '';
-        chaptersArray.forEach((ch, idx) => {
-            const li = document.createElement('li');
-            li.className = 'chapter-item';
-            li.innerHTML = `
-                <span class="chapter-number">${String(idx + 1).padStart(2, '0')}</span>
-                <span class="chapter-time">${ch.time}</span>
-                <span class="chapter-title">${ch.title}</span>
-            `;
-            chList.appendChild(li);
-        });
 
-        setProgress(72, "Extracting actionable highlights...");
+        // Brief cooldown to avoid hitting TPM limits on same provider
+        await new Promise(r => setTimeout(r, 2000));
 
-        // 4. Generate Highlights
-        const highlightMsg = [{ role: "user", parts: [{ text: `Extract exactly 5 to 7 key bullet point takeaways from the following video transcript. The transcript may be in any language — always respond in the SAME language as the transcript. Return ONLY a JSON array of strings representing each bullet point.\n\nTranscript:\n${maxContext}` }] }];
-        const highlightResult = await generateAIContent(null, highlightMsg);
-        
-        let hlText = highlightResult.replace(/```json/g, '').replace(/```/g, '').trim();
-        let highlightsArray = [];
-        try {
-            highlightsArray = JSON.parse(hlText);
-        } catch(e) {
-            highlightsArray = hlText.split('\n').filter(l => l.trim().length > 0).map(l => l.replace(/^[-\*0-9.]+\s*/, ''));
+        // 3 & 4: Generate Chapters + Highlights IN PARALLEL (saves ~5s)
+        setProgress(55, "Generating chapters and highlights in parallel...");
+
+        const chaptersPromise = (async () => {
+            const chaptersMsg = [{ role: 'user', parts: [{ text: `Analyze the following timestamped video transcript and generate 5-10 logical chapter markers. Each chapter should represent a distinct topic shift or segment of the video.\n\nReturn ONLY a JSON array of objects with "time" (in "M:SS" format) and "title" (short descriptive title) properties. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only.\n\nExample format: [{"time": "0:00", "title": "Introduction"}, {"time": "2:15", "title": "Main Topic"}]\n\nTimestamped Transcript:\n${timestampedContext}` }] }];
+            return await generateAIContent(null, chaptersMsg);
+        })();
+
+        const highlightsPromise = (async () => {
+            const highlightMsg = [{ role: "user", parts: [{ text: `Extract exactly 5 to 7 key bullet point takeaways from the following video transcript. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only. Return ONLY a JSON array of strings representing each bullet point.\n\nTranscript:\n${maxContext}` }] }];
+            return await generateAIContent(null, highlightMsg);
+        })();
+
+        const [chaptersSettled, highlightsSettled] = await Promise.allSettled([chaptersPromise, highlightsPromise]);
+
+        // Render Chapters
+        if (chaptersSettled.status === 'fulfilled') {
+            try {
+                let chapText = chaptersSettled.value.replace(/```json/g, '').replace(/```/g, '').trim();
+                let chaptersArray = [];
+                try {
+                    chaptersArray = JSON.parse(chapText);
+                } catch(e) {
+                    chaptersArray = chapText.split('\n').filter(l => l.trim().length > 0).map(l => {
+                        const match = l.match(/(\d+:\d+)\s*[-–:]?\s*(.+)/);
+                        return match ? { time: match[1], title: match[2].trim() } : { time: '0:00', title: l.trim() };
+                    });
+                }
+                
+                const chList = document.getElementById('chapters-list');
+                chList.innerHTML = '';
+                chaptersArray.forEach((ch, idx) => {
+                    const li = document.createElement('li');
+                    li.className = 'chapter-item';
+                    li.innerHTML = `
+                        <span class="chapter-number">${String(idx + 1).padStart(2, '0')}</span>
+                        <span class="chapter-time">${ch.time}</span>
+                        <span class="chapter-title">${ch.title}</span>
+                    `;
+                    chList.appendChild(li);
+                });
+            } catch(e) {
+                document.getElementById('chapters-list').innerHTML = '<li style="color: var(--text-muted);">⚠️ Chapter parsing failed.</li>';
+            }
+        } else {
+            console.error("Chapters generation failed:", chaptersSettled.reason?.message);
+            document.getElementById('chapters-list').innerHTML = '<li style="color: var(--text-muted);">⚠️ Chapter generation failed. Please try again.</li>';
         }
-        
-        const hlList = document.getElementById('highlights-list');
-        hlList.innerHTML = '';
-        highlightsArray.forEach(hl => {
-            const li = document.createElement('li');
-            li.innerText = hl;
-            hlList.appendChild(li);
-        });
+
+        // Render Highlights
+        if (highlightsSettled.status === 'fulfilled') {
+            try {
+                let hlText = highlightsSettled.value.replace(/```json/g, '').replace(/```/g, '').trim();
+                let highlightsArray = [];
+                try {
+                    highlightsArray = JSON.parse(hlText);
+                } catch(e) {
+                    highlightsArray = hlText.split('\n').filter(l => l.trim().length > 0).map(l => l.replace(/^[-\*0-9.]+\s*/, ''));
+                }
+                
+                const hlList = document.getElementById('highlights-list');
+                hlList.innerHTML = '';
+                highlightsArray.forEach(hl => {
+                    const li = document.createElement('li');
+                    li.innerText = hl;
+                    hlList.appendChild(li);
+                });
+            } catch(e) {
+                document.getElementById('highlights-list').innerHTML = '<li style="color: var(--text-muted);">⚠️ Highlights parsing failed.</li>';
+            }
+        } else {
+            console.error("Highlights generation failed:", highlightsSettled.reason?.message);
+            document.getElementById('highlights-list').innerHTML = '<li style="color: var(--text-muted);">⚠️ Highlights generation failed. Please try again.</li>';
+        }
+
+        setProgress(80, "Finalizing...");
+
+        // Transcript stats
+        const wordCount = currentTranscriptText.split(/\s+/).length;
+        const readingTime = Math.ceil(wordCount / 200);
+        const statsEl = document.getElementById('transcript-stats');
+        if (statsEl) statsEl.innerText = `${wordCount.toLocaleString()} words · ~${readingTime} min read`;
 
         setProgress(90, "Instantiating interactive chat context...");
 
@@ -631,7 +715,7 @@ async function processVideoUrl(url) {
         chatHistory = [
              {
                  role: "user",
-                 parts: [{ text: `I am going to ask you questions about a video. Here is the transcript of the video as context. The transcript may be in any language — please always respond in the SAME language as the transcript.\n\n${maxContext}` }],
+                 parts: [{ text: `I am going to ask you questions about a video. Here is the transcript of the video as context. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only.\n\n${maxContext}` }],
              },
              {
                  role: "assistant",
@@ -645,13 +729,19 @@ async function processVideoUrl(url) {
 
     } catch (err) {
         console.error(err);
-        const errorDiv = document.getElementById('error-message') || document.createElement('div');
+        // Clean, user-friendly error banner with retry button
+        const existingError = document.getElementById('error-message');
+        if (existingError) existingError.remove();
+        
+        const errorDiv = document.createElement('div');
         errorDiv.id = 'error-message';
-        errorDiv.className = 'error-banner';
-        errorDiv.innerText = `Error: ${err.message}`;
-        errorDiv.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-        errorDiv.style.color = 'var(--error-color)';
-        errorDiv.style.border = '1px solid rgba(239, 68, 68, 0.2)';
+        errorDiv.style.cssText = 'background:rgba(239,68,68,0.08);color:#ef4444;border:1px solid rgba(239,68,68,0.2);border-radius:12px;padding:16px 20px;margin-bottom:16px;display:flex;align-items:center;gap:12px;font-size:14px;';
+        
+        const msg = err.message.includes('All configured AI providers failed') 
+            ? 'All AI providers are temporarily rate-limited. Please wait 30 seconds and try again.' 
+            : `Error: ${err.message}`;
+        
+        errorDiv.innerHTML = `<span style="flex:1">⚠️ ${msg}</span><button onclick="this.parentNode.remove()" style="background:rgba(239,68,68,0.15);border:none;color:#ef4444;padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;">Dismiss</button>`;
         urlForm.parentNode.insertBefore(errorDiv, urlForm);
         showView('landing');
     }
@@ -794,4 +884,38 @@ document.addEventListener('mousemove', (e) => {
     card.style.setProperty('--x', `${x}px`);
     card.style.setProperty('--y', `${y}px`);
   }
+});
+
+// --- Copy & Download Handlers ---
+function flashButton(btn, text) {
+    const original = btn.innerHTML;
+    btn.innerHTML = `<span style="font-size:12px;">${text}</span>`;
+    setTimeout(() => { btn.innerHTML = original; }, 1500);
+}
+
+document.getElementById('btn-copy-summary')?.addEventListener('click', () => {
+    const text = document.getElementById('summary-text')?.innerText;
+    if (text) { navigator.clipboard.writeText(text); flashButton(document.getElementById('btn-copy-summary'), '✓ Copied!'); }
+});
+
+document.getElementById('btn-copy-highlights')?.addEventListener('click', () => {
+    const items = document.querySelectorAll('#highlights-list li');
+    const text = Array.from(items).map((li, i) => `${i+1}. ${li.innerText}`).join('\n');
+    if (text) { navigator.clipboard.writeText(text); flashButton(document.getElementById('btn-copy-highlights'), '✓ Copied!'); }
+});
+
+document.getElementById('btn-copy-transcript')?.addEventListener('click', () => {
+    if (currentTranscriptText) { navigator.clipboard.writeText(currentTranscriptText); flashButton(document.getElementById('btn-copy-transcript'), '✓ Copied!'); }
+});
+
+document.getElementById('btn-download-transcript')?.addEventListener('click', () => {
+    if (!currentTranscriptText) return;
+    const title = document.getElementById('video-title')?.innerText || 'transcript';
+    const blob = new Blob([currentTranscriptText], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${title.replace(/[^a-zA-Z0-9]/g, '_')}_transcript.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flashButton(document.getElementById('btn-download-transcript'), '✓ Saved!');
 });
