@@ -179,8 +179,8 @@ app.post('/api/transcript', async (req, res) => {
                 }
                 
                 if (segments.length > 0) {
-                    console.log(`[Strategy 3] Got ${segments.length} segments via yt-dlp subtitles.`);
-                    return res.json({ success: true, transcript: segments, metadata: await fetchMetadata(videoId) });
+                    console.log(`[Strategy 3] Got ${segments.length} segments via yt-dlp subtitles (lang: ${subLang}).`);
+                    return res.json({ success: true, transcript: segments, language: subLang, metadata: await fetchMetadata(videoId) });
                 }
             }
             
@@ -332,6 +332,95 @@ app.post('/api/audio-transcript', async (req, res) => {
     } catch (error) {
         console.error('Audio Transcription error:', error.message);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// --- AI GENERATION ENGINE ---
+const PROVIDER_MAX_CHARS = {
+    groq: 10000,
+    openrouter: 50000,
+    gemini: 50000,
+    cerebras: 6000
+};
+
+async function executeAIRequestServer(provider, apiKey, systemPrompt, userMessages) {
+    let url, headers = {}, body = {};
+    const messages = systemPrompt ? [{ role: "system", content: systemPrompt }, ...userMessages] : userMessages;
+    let isGoogleFormat = false;
+
+    switch (provider) {
+        case 'openrouter':
+            url = 'https://openrouter.ai/api/v1/chat/completions';
+            headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+            body = { model: 'meta-llama/llama-3.3-70b-instruct:free', messages };
+            break;
+        case 'cerebras':
+            url = 'https://api.cerebras.ai/v1/chat/completions';
+            headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+            body = { model: 'llama3.1-8b', messages };
+            break;
+        case 'groq':
+            url = 'https://api.groq.com/openai/v1/chat/completions';
+            headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
+            body = { model: 'llama-3.3-70b-versatile', messages };
+            break;
+        case 'gemini':
+            isGoogleFormat = true;
+            url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            headers = { 'Content-Type': 'application/json' };
+            const geminiMessages = messages.map(m => ({
+                role: m.role === 'system' ? 'user' : (m.role === 'assistant' ? 'model' : 'user'),
+                parts: [{ text: m.content || m.parts?.[0]?.text || '' }]
+            }));
+            if (systemPrompt) geminiMessages.unshift({ role: 'user', parts: [{ text: `SYSTEM INSTRUCTION: ${systemPrompt}` }] });
+            body = { contents: geminiMessages };
+            break;
+        default:
+            throw new Error(`Unknown provider: ${provider}`);
+    }
+
+    const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!response.ok) {
+        const errInfo = await response.text();
+        throw new Error(`${provider} API Error: ${response.status} ${errInfo}`);
+    }
+    const data = await response.json();
+    return isGoogleFormat ? data.candidates[0].content.parts[0].text : data.choices[0].message.content;
+}
+
+app.post('/api/generate', async (req, res) => {
+    try {
+        const { systemPrompt, userMessages, clientKeys, preferredProvider } = req.body;
+        
+        const getApiKey = (provider) => {
+            const keyMap = { openrouter: 'OPENROUTER_API_KEY', groq: 'GROQ_API_KEY', gemini: 'GOOGLE_AI_KEY', cerebras: 'CEREBRAS_API_KEY'};
+            return (clientKeys && clientKeys[provider]) || process.env[keyMap[provider]];
+        };
+
+        const allProviders = ['groq', 'openrouter', 'gemini', 'cerebras'];
+        const fallbackQueue = [preferredProvider || 'groq', ...allProviders.filter(p => p !== (preferredProvider || 'groq'))];
+
+        for (const provider of fallbackQueue) {
+            const apiKey = getApiKey(provider);
+            if (!apiKey) continue;
+            
+            const maxChars = PROVIDER_MAX_CHARS[provider] || 20000;
+            const sizedMessages = userMessages.map(m => {
+                const text = m.content || (m.parts && m.parts[0] && m.parts[0].text) || '';
+                return { role: m.role, content: text.substring(0, maxChars) };
+            });
+
+            try {
+                console.log(`[AI] Attempting generation via ${provider}...`);
+                const result = await executeAIRequestServer(provider, apiKey, systemPrompt, sizedMessages);
+                return res.json({ success: true, result, provider });
+            } catch (err) {
+                console.warn(`[AI] Provider ${provider} failed: ${err.message}`);
+            }
+        }
+        res.status(500).json({ success: false, error: 'All configured AI providers failed due to rate limits or API errors.' });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
     }
 });
 

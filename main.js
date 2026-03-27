@@ -339,176 +339,36 @@ async function fetchAudioTranscriptFromBackend(url, whisperKey) {
     }
 }
 
-// --- Unified AI Client ---
-async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
-    let url = '';
-    let headers = {
-        'Content-Type': 'application/json'
-    };
-    let body = {};
-    let isGoogleFormat = false;
-
-    // Build standard OpenAI-compatible messages array
-    let messages = [];
-    if (systemPrompt && provider !== 'gemini') {
-        messages.push({ role: "system", content: systemPrompt });
-    }
+// --- Unified AI Client (Now Server-Side) ---
+async function generateAIContent(systemPrompt, userMessages) {
+    const preferredProvider = localStorage.getItem('vidbrief_provider') || 'groq';
     
-    // Convert generic userMessages to OpenAI format usually
-    const formattedUserMessages = userMessages.map(m => ({ role: m.role, content: m.parts[0].text }));
-    messages = messages.concat(formattedUserMessages);
+    // Pass user's local keys to the backend in case they BYOK (Bring Your Own Key)
+    const clientKeys = {
+        groq: localStorage.getItem('vidbrief_groq_key') || null,
+        openrouter: localStorage.getItem('vidbrief_openrouter_key') || null,
+        gemini: localStorage.getItem('vidbrief_gemini_key') || null,
+        cerebras: localStorage.getItem('vidbrief_cerebras_key') || null
+    };
 
-    switch(provider) {
-        case 'openrouter':
-            url = 'https://openrouter.ai/api/v1/chat/completions';
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            body = {
-                model: 'meta-llama/llama-3.3-70b-instruct:free',
-                messages: messages
-            };
-            break;
-        case 'groq':
-            url = 'https://api.groq.com/openai/v1/chat/completions';
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            body = {
-                model: 'llama-3.3-70b-versatile',
-                messages: messages
-            };
-            break;
-        case 'cerebras':
-            url = 'https://api.cerebras.ai/v1/chat/completions';
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            body = {
-                model: 'llama3.1-8b',
-                messages: messages
-            };
-            break;
-        case 'xai':
-            url = 'https://api.x.ai/v1/chat/completions';
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            body = {
-                model: 'grok-3-mini-fast',
-                messages: messages
-            };
-            break;
-        case 'gemini':
-            isGoogleFormat = true;
-            url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-            
-            // Re-map messages to Gemini specifics
-            let geminiContext = "";
-            if (systemPrompt) geminiContext = `System Instructions: ${systemPrompt}\n\n`;
-            
-            let geminiMessages = userMessages.map(m => {
-                let r = m.role === 'assistant' ? 'model' : m.role;
-                // Deep copy parts to prevent mutating the original msg object in fallbacks
-                return { role: r, parts: [{ text: m.parts[0].text }] }
-            });
-
-            if (geminiMessages.length > 0) {
-               geminiMessages[0].parts[0].text = geminiContext + geminiMessages[0].parts[0].text;
-            }
-
-            body = { contents: geminiMessages };
-            break;
-    }
-
-    const response = await fetch(url, {
+    const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: headers,
-        body: JSON.stringify(body)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemPrompt, userMessages, clientKeys, preferredProvider })
     });
 
-    if (!response.ok) {
-        const errInfo = await response.text();
-        throw new Error(`${provider} API Error: ${response.status} ${errInfo}`);
-    }
-
     const data = await response.json();
+    if (!data.success) {
+        throw new Error(data.error || 'Server failed to generate AI content');
+    }
     
-    if (isGoogleFormat) {
-        return data.candidates[0].content.parts[0].text;
-    } else {
-        return data.choices[0].message.content;
-    }
-}
-
-// Provider-specific max character limits (to respect TPM/context limits)
-const PROVIDER_MAX_CHARS = {
-    groq: 10000,
-    openrouter: 50000,
-    gemini: 50000,
-    cerebras: 6000
-};
-
-async function generateAIContent(systemPrompt, userMessages) {
-    const selectedProvider = localStorage.getItem('vidbrief_provider') || 'openrouter';
-    const allProviders = ['groq', 'openrouter', 'gemini', 'cerebras'];
-    
-    // Put selected provider first, then the rest
-    const fallbackQueue = [selectedProvider, ...allProviders.filter(p => p !== selectedProvider)];
-
-    let lastError = null;
-    let triedCount = 0;
-
-    for (const provider of fallbackQueue) {
-        const apiKey = localStorage.getItem(`vidbrief_${provider}_key`);
-        
-        // Skip provider if no key is configured
-        if (!apiKey) continue;
-        
-        triedCount++;
-        
-        // Show which provider is being used in the loading UI
-        const stepEl = document.getElementById('loading-step');
-        if (stepEl) {
-            stepEl.innerText = triedCount > 1 
-                ? `Previous provider failed. Retrying with ${provider}...` 
-                : `Generating via ${provider}...`;
-        }
-
-        // Auto-truncate messages to fit this provider's limit
-        const maxChars = PROVIDER_MAX_CHARS[provider] || 20000;
-        const sizedMessages = userMessages.map(m => ({
-            ...m,
-            parts: [{ text: m.parts[0].text.substring(0, maxChars) }]
-        }));
-
-        try {
-            return await executeAIRequest(provider, apiKey, systemPrompt, sizedMessages);
-        } catch (err) {
-            console.warn(`Provider ${provider} failed: ${err.message}. Fetching fallback...`);
-            lastError = err;
-            
-            // On 429: parse exact retry-after time from error, wait that long, then retry same provider once
-            if (err.message.includes('429')) {
-                const retryMatch = err.message.match(/try again in ([\d.]+)s/i);
-                const waitSec = retryMatch ? Math.min(parseFloat(retryMatch[1]), 30) : 5;
-                console.log(`Rate limited. Waiting ${waitSec}s before trying next provider...`);
-                await new Promise(r => setTimeout(r, waitSec * 1000));
-            }
-            
-            // On context_length_exceeded, truncate hard and retry same provider once
-            if (err.message.includes('context_length_exceeded') && !err._retried) {
-                try {
-                    const shorterMessages = userMessages.map(m => ({
-                        ...m,
-                        parts: [{ text: m.parts[0].text.substring(0, 4000) }]
-                    }));
-                    return await executeAIRequest(provider, apiKey, systemPrompt, shorterMessages);
-                } catch(retryErr) {
-                    retryErr._retried = true;
-                    lastError = retryErr;
-                }
-            }
-        }
+    // Update loading UI if backend automatically fell back to another provider
+    const stepEl = document.getElementById('loading-step');
+    if (stepEl && data.provider && data.provider !== preferredProvider) {
+        stepEl.innerText = `Fell back to ${data.provider}...`;
     }
 
-    if (triedCount === 0) {
-        throw new Error(`No API keys configured. Please configure at least one provider in Settings.`);
-    }
-
-    throw new Error(`All configured AI providers failed. Last error: ${lastError?.message}`);
+    return data.result;
 }
 
 
@@ -578,7 +438,48 @@ async function processVideoUrl(url) {
         setProgress(35, `Transcript acquired. Initializing ${provider} Intelligence...`);
         
         // Populate Transcript UI and save raw text for AI
-        const rawTranscriptArr = backendData.transcript;
+        let rawTranscriptArr = backendData.transcript;
+        const transcriptLang = backendData.language || 'en';
+        
+        // If transcript is NOT in English, translate it via AI
+        if (transcriptLang && !transcriptLang.startsWith('en')) {
+            try {
+                setProgress(35, `Transcript is in "${transcriptLang}". Translating to English...`);
+                
+                // Translate in chunks of ~50 segments to stay within token limits
+                const chunkSize = 50;
+                const translatedSegments = [];
+                
+                for (let i = 0; i < rawTranscriptArr.length; i += chunkSize) {
+                    const chunk = rawTranscriptArr.slice(i, i + chunkSize);
+                    const textToTranslate = chunk.map((t, idx) => `[${idx}] ${t.text}`).join('\n');
+                    
+                    const translateMsg = [{ role: 'user', parts: [{ text: `Translate the following subtitles to English. Keep the [number] prefix intact on each line. Only translate the text, do not add explanations. Return one translated line per original line.\n\n${textToTranslate}` }] }];
+                    
+                    const translated = await generateAIContent(null, translateMsg);
+                    const translatedLines = translated.split('\n').filter(l => l.trim().length > 0);
+                    
+                    chunk.forEach((seg, idx) => {
+                        const matchedLine = translatedLines.find(l => l.startsWith(`[${idx}]`));
+                        translatedSegments.push({
+                            ...seg,
+                            text: matchedLine ? matchedLine.replace(/^\[\d+\]\s*/, '').trim() : seg.text
+                        });
+                    });
+                    
+                    // Cooldown between translation chunks
+                    if (i + chunkSize < rawTranscriptArr.length) {
+                        await new Promise(r => setTimeout(r, 2000));
+                    }
+                }
+                
+                rawTranscriptArr = translatedSegments;
+                setProgress(38, "Translation complete!");
+            } catch(e) {
+                console.warn("Transcript translation failed, using original language:", e.message);
+            }
+        }
+
         currentTranscriptText = rawTranscriptArr.map(t => t.text).join(' ');
         
         const trContainer = document.getElementById('transcript-container');
@@ -612,10 +513,32 @@ async function processVideoUrl(url) {
 
         // 2. Generate Summary
         try {
-            setProgress(40, "Synthesizing executive summary...");
-            const summaryMsg = [{ role: 'user', parts: [{ text: `Provide a comprehensive executive summary of the following video transcript. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only. Make it flow well and capture the core essence of the video accurately.\n\nTranscript:\n${maxContext}` }] }];
+            setProgress(40, "Synthesizing comprehensive executive summary...");
+            const summaryMsg = [{ role: 'user', parts: [{ text: `You are an expert content analyst. Write a COMPREHENSIVE and DETAILED executive summary of the following video transcript. 
+
+IMPORTANT REQUIREMENTS:
+- You MUST respond in ENGLISH only, regardless of the transcript's language
+- Your summary MUST be at least 300 words long
+- Structure your response with clear paragraphs
+- Start with a brief overview paragraph
+- Then cover the main topics discussed in detail
+- End with key conclusions or final thoughts from the video
+- Use professional, engaging language
+- Capture ALL major points, not just a brief overview
+
+Transcript:\n${maxContext}` }] }];
             const summaryResult = await generateAIContent(null, summaryMsg);
-            document.getElementById('summary-text').innerText = summaryResult;
+            // Render with paragraph formatting
+            const formattedSummary = summaryResult
+                .split('\n')
+                .filter(p => p.trim().length > 0)
+                .map(p => {
+                    if (p.startsWith('#')) return `<h4 style="color:var(--accent-primary);margin:16px 0 8px;">${p.replace(/^#+\s*/, '')}</h4>`;
+                    if (p.startsWith('**') && p.endsWith('**')) return `<h4 style="color:var(--accent-primary);margin:16px 0 8px;">${p.replace(/\*\*/g, '')}</h4>`;
+                    return `<p style="margin-bottom:12px;line-height:1.8;color:var(--text-secondary);">${p}</p>`;
+                })
+                .join('');
+            document.getElementById('summary-text').innerHTML = formattedSummary || `<p style="line-height:1.8;">${summaryResult}</p>`;
             document.getElementById('summary-tease').innerText = "AI Generated Executive Summary complete.";
         } catch(e) {
             console.error("Summary generation failed:", e.message);
@@ -624,22 +547,57 @@ async function processVideoUrl(url) {
         }
 
         // Brief cooldown to avoid hitting TPM limits on same provider
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 3000));
 
-        // 3 & 4: Generate Chapters + Highlights IN PARALLEL (saves ~5s)
-        setProgress(55, "Generating chapters and highlights in parallel...");
+        // 3. Generate Chapters (sequential to avoid double TPM usage)
+        setProgress(55, "Generating intelligent video chapters...");
 
-        const chaptersPromise = (async () => {
-            const chaptersMsg = [{ role: 'user', parts: [{ text: `Analyze the following timestamped video transcript and generate 5-10 logical chapter markers. Each chapter should represent a distinct topic shift or segment of the video.\n\nReturn ONLY a JSON array of objects with "time" (in "M:SS" format) and "title" (short descriptive title) properties. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only.\n\nExample format: [{"time": "0:00", "title": "Introduction"}, {"time": "2:15", "title": "Main Topic"}]\n\nTimestamped Transcript:\n${timestampedContext}` }] }];
-            return await generateAIContent(null, chaptersMsg);
-        })();
+        let chaptersResult = null;
+        try {
+            const chaptersMsg = [{ role: 'user', parts: [{ text: `You are a video content analyst. Analyze the following timestamped transcript and generate 8-15 detailed chapter markers. Each chapter should represent a distinct topic shift or segment.
 
-        const highlightsPromise = (async () => {
-            const highlightMsg = [{ role: "user", parts: [{ text: `Extract exactly 5 to 7 key bullet point takeaways from the following video transcript. The transcript may be in any language, but you MUST ALWAYS respond in ENGLISH only. Return ONLY a JSON array of strings representing each bullet point.\n\nTranscript:\n${maxContext}` }] }];
-            return await generateAIContent(null, highlightMsg);
-        })();
+IMPORTANT REQUIREMENTS:
+- Respond in ENGLISH only, regardless of transcript language
+- Generate 8-15 chapters (more for longer videos)
+- Each chapter needs a "time" (M:SS format), "title" (concise), and "description" (1-2 sentence summary of what happens in this segment)
+- Return ONLY a valid JSON array
 
-        const [chaptersSettled, highlightsSettled] = await Promise.allSettled([chaptersPromise, highlightsPromise]);
+Example: [{"time": "0:00", "title": "Introduction", "description": "The host introduces the topic and sets the stage."}, {"time": "2:15", "title": "Main Discussion", "description": "Deep dive into the core subject with examples."}]
+
+Timestamped Transcript:\n${timestampedContext}` }] }];
+            chaptersResult = await generateAIContent(null, chaptersMsg);
+        } catch(e) {
+            console.error("Chapters generation failed:", e.message);
+        }
+
+        // Cooldown before next AI call
+        await new Promise(r => setTimeout(r, 3000));
+
+        // 4. Generate Highlights
+        setProgress(70, "Extracting key highlights...");
+
+        let highlightsResult = null;
+        try {
+            const highlightMsg = [{ role: "user", parts: [{ text: `You are a content analyst. Extract 8-10 KEY INSIGHTS and takeaways from this video transcript.
+
+IMPORTANT REQUIREMENTS:
+- Respond in ENGLISH only, regardless of transcript language
+- Extract 8-10 key points (not less)
+- Each takeaway should be 2-3 detailed sentences, not just a brief phrase
+- Cover different aspects of the video — don't repeat similar points
+- Include specific details, facts, numbers, or examples mentioned in the video
+- Return ONLY a valid JSON array of strings
+
+Transcript:\n${maxContext}` }] }];
+            highlightsResult = await generateAIContent(null, highlightMsg);
+        } catch(e) {
+            console.error("Highlights generation failed:", e.message);
+        }
+
+        const [chaptersSettled, highlightsSettled] = [
+            chaptersResult ? { status: 'fulfilled', value: chaptersResult } : { status: 'rejected', reason: new Error('Chapters generation failed') },
+            highlightsResult ? { status: 'fulfilled', value: highlightsResult } : { status: 'rejected', reason: new Error('Highlights generation failed') }
+        ];
 
         // Render Chapters
         if (chaptersSettled.status === 'fulfilled') {
@@ -663,7 +621,10 @@ async function processVideoUrl(url) {
                     li.innerHTML = `
                         <span class="chapter-number">${String(idx + 1).padStart(2, '0')}</span>
                         <span class="chapter-time">${ch.time}</span>
-                        <span class="chapter-title">${ch.title}</span>
+                        <div class="chapter-content">
+                            <span class="chapter-title">${ch.title}</span>
+                            ${ch.description ? `<span class="chapter-desc" style="display:block;font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.5;">${ch.description}</span>` : ''}
+                        </div>
                     `;
                     chList.appendChild(li);
                 });
@@ -688,9 +649,10 @@ async function processVideoUrl(url) {
                 
                 const hlList = document.getElementById('highlights-list');
                 hlList.innerHTML = '';
-                highlightsArray.forEach(hl => {
+                highlightsArray.forEach((hl, idx) => {
                     const li = document.createElement('li');
-                    li.innerText = hl;
+                    li.style.cssText = 'padding:12px 0;border-bottom:1px solid rgba(255,255,255,0.05);line-height:1.7;';
+                    li.innerHTML = `<strong style="color:var(--accent-primary);margin-right:8px;">${idx + 1}.</strong> ${hl}`;
                     hlList.appendChild(li);
                 });
             } catch(e) {
