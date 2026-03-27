@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "concurrently --kill-others -n frontend,api -c cyan,magenta \"vite\" \"node api/index.js\"",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -21,7 +22,10 @@
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "openai": "^6.33.0",
+    "play-dl": "^1.9.7",
     "youtube-captions-scraper": "^2.0.3",
+    "youtube-dl-exec": "^3.1.4",
     "youtube-transcript": "^1.2.1",
     "youtubei.js": "^16.0.1"
   }

@@ -18,13 +18,19 @@ async function initSupabase() {
     try {
         const res = await fetch('/api/config');
         const config = await res.json();
-        // Since we are also adding SUPABASE keys to the backend config
+        // Check carefully because invalid malformed keys crash the client
         if (config.supabaseUrl && config.supabaseKey) {
-            supabase = createClient(config.supabaseUrl, config.supabaseKey);
-            checkUser();
+            try {
+                // Initialize safely
+                supabase = createClient(config.supabaseUrl, config.supabaseKey);
+                checkUser();
+            } catch(initErr) {
+                console.warn("Supabase client creation failed (likely invalid key):", initErr.message);
+                supabase = null;
+            }
         }
     } catch(e) {
-        console.error("Supabase init failed", e);
+        console.warn("Could not fetch /api/config or parse response.", e);
     }
 }
 initSupabase();
@@ -90,43 +96,52 @@ const tabContents = document.querySelectorAll('.tab-content');
 // --- Initialization ---
 async function loadSettings() {
     // Load active provider
-    const savedProvider = localStorage.getItem('vidbrief_provider');
-    if (savedProvider) providerSelect.value = savedProvider;
-
-    // Try to load keys from backend first, fallback to localStorage
     try {
+        const savedProvider = localStorage.getItem('vidbrief_provider');
+        if (savedProvider && providerSelect) {
+            providerSelect.value = savedProvider;
+        }
+
+        // Try to load keys from backend first, fallback to localStorage
         const res = await fetch('/api/config');
         if (res.ok) {
             const envKeys = await res.json();
             
             Object.keys(keys).forEach(k => {
-                // Precedence: Supabase DB > localStorage > .env server config (if empty)
-                const savedKey = localStorage.getItem(`vidbrief_${k}_key`);
-                if (savedKey) {
-                    keys[k].value = savedKey;
-                } else if (envKeys[k]) {
+                // Precedence: .env server config > localStorage (so updated .env keys always apply)
+                if (envKeys[k] && keys[k]) {
                     keys[k].value = envKeys[k];
-                    // Cache the env key into localStorage for immediate offline use
                     localStorage.setItem(`vidbrief_${k}_key`, envKeys[k]);
+                } else {
+                    const savedKey = localStorage.getItem(`vidbrief_${k}_key`);
+                    if (savedKey && keys[k]) {
+                        keys[k].value = savedKey;
+                    }
                 }
             });
 
             // If user is logged in, try to fetch from Supabase table
-            if (currentUser) {
-                const { data, error } = await supabase
-                    .from('user_configs')
-                    .select('*')
-                    .eq('id', currentUser.id)
-                    .single();
+            if (currentUser && supabase) {
+                try {
+                    const { data, error } = await supabase
+                        .from('user_configs')
+                        .select('*')
+                        .eq('id', currentUser.id)
+                        .single();
 
-                if (data) {
-                    providerSelect.value = data.provider || providerSelect.value;
-                    Object.keys(keys).forEach(k => {
-                        if (data[`${k}_key`]) {
-                            keys[k].value = data[`${k}_key`];
-                            localStorage.setItem(`vidbrief_${k}_key`, data[`${k}_key`]);
+                    if (data) {
+                        if (providerSelect && data.provider) {
+                            providerSelect.value = data.provider;
                         }
-                    });
+                        Object.keys(keys).forEach(k => {
+                            if (data[`${k}_key`] && keys[k]) {
+                                keys[k].value = data[`${k}_key`];
+                                localStorage.setItem(`vidbrief_${k}_key`, data[`${k}_key`]);
+                            }
+                        });
+                    }
+                } catch(dbErr) {
+                    console.warn("Could not fetch user configs from DB:", dbErr.message);
                 }
             }
         }
@@ -134,7 +149,7 @@ async function loadSettings() {
         console.warn("Could not load backend config, falling back to pure localStorage", e);
         Object.keys(keys).forEach(k => {
             const savedKey = localStorage.getItem(`vidbrief_${k}_key`);
-            if (savedKey) keys[k].value = savedKey;
+            if (savedKey && keys[k]) keys[k].value = savedKey;
         });
     }
 }
@@ -144,7 +159,7 @@ loadSettings();
 btnSettings?.addEventListener('click', () => settingsModal?.classList.remove('hidden'));
 btnCloseModal?.addEventListener('click', () => settingsModal?.classList.add('hidden'));
 
-btnSaveKey.addEventListener('click', async () => {
+btnSaveKey?.addEventListener('click', async () => {
     localStorage.setItem('vidbrief_provider', providerSelect.value);
     const configData = { provider: providerSelect.value };
     
@@ -154,32 +169,41 @@ btnSaveKey.addEventListener('click', async () => {
         configData[`${k}_key`] = val;
     });
 
-    if (currentUser) {
-        const { error } = await supabase
-            .from('user_configs')
-            .upsert({ id: currentUser.id, ...configData });
-        
-        if (error) console.error("Failed to sync to Supabase:", error);
+    if (currentUser && supabase) {
+        try {
+            const { error } = await supabase
+                .from('user_configs')
+                .upsert({ id: currentUser.id, ...configData });
+            
+            if (error) console.error("Failed to sync to Supabase:", error);
+        } catch(e) {
+            console.error("Failed to sync to Supabase:", e);
+        }
     }
     
-    settingsModal.classList.add('hidden');
-    alert("Configuration saved securely.");
+    settingsModal?.classList.add('hidden');
+    // Non-blocking notification
+    console.log("Configuration saved securely.");
 });
 
 // --- Auth Logic ---
 async function checkUser() {
     if (!supabase) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    currentUser = user;
-    
-    if (user) {
-        btnSignIn.classList.add('hidden');
-        btnLogout.classList.remove('hidden');
-        // Reload settings for this user
-        loadSettings();
-    } else {
-        btnSignIn.classList.remove('hidden');
-        btnLogout.classList.add('hidden');
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        currentUser = user;
+        
+        if (user) {
+            btnSignIn?.classList.add('hidden');
+            btnLogout?.classList.remove('hidden');
+            // Reload settings for this user
+            loadSettings();
+        } else {
+            btnSignIn?.classList.remove('hidden');
+            btnLogout?.classList.add('hidden');
+        }
+    } catch(e) {
+        console.warn("Auth check failed:", e.message);
     }
 }
 
@@ -208,7 +232,7 @@ authSwitchLink?.addEventListener('click', (e) => {
     authSwitchLink.textContent = isSignUp ? "Sign In" : "Sign Up";
 });
 
-authForm.addEventListener('submit', async (e) => {
+authForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = authEmail.value;
     const password = authPassword.value;
@@ -216,6 +240,13 @@ authForm.addEventListener('submit', async (e) => {
     authSubmitBtn.disabled = true;
     authSubmitBtn.textContent = isSignUp ? "Creating account..." : "Signing in...";
     
+    if (!supabase) {
+        alert("Authentication service is unavailable.");
+        authSubmitBtn.disabled = false;
+        authSubmitBtn.textContent = isSignUp ? "Sign Up" : "Sign In";
+        return;
+    }
+
     try {
         let result;
         if (isSignUp) {
@@ -229,11 +260,28 @@ authForm.addEventListener('submit', async (e) => {
         if (isSignUp) {
             alert("Signup successful! Please check your email for verification.");
         } else {
-            authModal.classList.add('hidden');
+            authModal?.classList.add('hidden');
             checkUser();
         }
     } catch(err) {
-        alert(err.message);
+        console.error("Auth error:", err.message);
+        
+        // Display a more subtle temporary message directly under the button instead of a blocking alert
+        const errorMsg = document.createElement('div');
+        errorMsg.style.color = '#ff4a4a';
+        errorMsg.style.marginTop = '0.5rem';
+        errorMsg.style.fontSize = '0.9rem';
+        errorMsg.style.textAlign = 'center';
+        
+        if (err.message === 'Failed to fetch') {
+            errorMsg.innerText = "Network Error: Could not reach the authentication server. Please check that your SUPABASE_URL in .env is valid.";
+        } else {
+            errorMsg.innerText = err.message;
+        }
+        
+        authForm.appendChild(errorMsg);
+        setTimeout(() => errorMsg.remove(), 6000);
+        
     } finally {
         authSubmitBtn.disabled = false;
         authSubmitBtn.textContent = isSignUp ? "Sign Up" : "Sign In";
@@ -263,7 +311,27 @@ async function fetchTranscriptFromBackend(url) {
         const data = await response.json();
         
         if (!data.success) {
-            throw new Error(data.error);
+            const errorObj = new Error(data.error);
+            errorObj.code = data.code;
+            throw errorObj;
+        }
+        return data; 
+    } catch (err) {
+        throw err;
+    }
+}
+
+async function fetchAudioTranscriptFromBackend(url, whisperKey) {
+    try {
+        const response = await fetch('/api/audio-transcript', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, whisperKey })
+        });
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Audio Extraction Failed');
         }
         return data; 
     } catch (err) {
@@ -299,14 +367,6 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
                 messages: messages
             };
             break;
-        case 'openai':
-            url = 'https://api.openai.com/v1/chat/completions';
-            headers['Authorization'] = `Bearer ${apiKey}`;
-            body = {
-                model: 'gpt-4o-mini',
-                messages: messages
-            };
-            break;
         case 'groq':
             url = 'https://api.groq.com/openai/v1/chat/completions';
             headers['Authorization'] = `Bearer ${apiKey}`;
@@ -327,13 +387,13 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
             url = 'https://api.x.ai/v1/chat/completions';
             headers['Authorization'] = `Bearer ${apiKey}`;
             body = {
-                model: 'grok-2-latest',
+                model: 'grok-3-mini-fast',
                 messages: messages
             };
             break;
         case 'gemini':
             isGoogleFormat = true;
-            url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
             
             // Re-map messages to Gemini specifics
             let geminiContext = "";
@@ -375,7 +435,7 @@ async function executeAIRequest(provider, apiKey, systemPrompt, userMessages) {
 
 async function generateAIContent(systemPrompt, userMessages) {
     const selectedProvider = localStorage.getItem('vidbrief_provider') || 'openrouter';
-    const allProviders = ['openrouter', 'openai', 'groq', 'cerebras', 'gemini', 'xai'];
+    const allProviders = ['groq', 'openrouter', 'gemini', 'cerebras'];
     
     // Put selected provider first, then the rest
     const fallbackQueue = [selectedProvider, ...allProviders.filter(p => p !== selectedProvider)];
@@ -394,8 +454,8 @@ async function generateAIContent(systemPrompt, userMessages) {
         // Update loading UI slightly if we are falling back
         if (triedCount > 1) {
              const stepEl = document.getElementById('loading-step');
-             if (stepEl && !stepEl.innerText.includes('Retrying')) {
-                 stepEl.innerText += ` (Retrying with ${provider}...)`;
+             if (stepEl) {
+                 stepEl.innerText = `Retrying with ${provider}...`;
              }
         }
 
@@ -404,6 +464,25 @@ async function generateAIContent(systemPrompt, userMessages) {
         } catch (err) {
             console.warn(`Provider ${provider} failed: ${err.message}. Fetching fallback...`);
             lastError = err;
+            
+            // On 429 rate limit, wait briefly then continue to next provider
+            if (err.message.includes('429')) {
+                await new Promise(r => setTimeout(r, 2000));
+            }
+            
+            // On context_length_exceeded, truncate messages and retry same provider once
+            if (err.message.includes('context_length_exceeded') && !err._retried) {
+                try {
+                    const shorterMessages = userMessages.map(m => ({
+                        ...m,
+                        parts: [{ text: m.parts[0].text.substring(0, 4000) }]
+                    }));
+                    return await executeAIRequest(provider, apiKey, systemPrompt, shorterMessages);
+                } catch(retryErr) {
+                    retryErr._retried = true;
+                    lastError = retryErr;
+                }
+            }
         }
     }
 
@@ -433,12 +512,28 @@ async function processVideoUrl(url) {
     }
 
     showView('loading');
-    setProgress(10, "Fetching video metadata and neural transcript...");
+    setProgress(5, "Fetching video metadata and neural transcript...");
 
     try {
-        // 1. Fetch from Local Backend
-        const backendData = await fetchTranscriptFromBackend(url);
-        setProgress(40, `Transcript acquired. Initializing ${provider} Intelligence...`);
+        // 1. Fetch transcript — auto-cascade to Whisper Audio if captions missing
+        let backendData;
+        try {
+            backendData = await fetchTranscriptFromBackend(url);
+        } catch (transcriptErr) {
+            if (transcriptErr.code === 'NO_TRANSCRIPT_AVAILABLE') {
+                console.warn('No captions found. Automatically falling back to Whisper Audio extraction...');
+                setProgress(10, "No captions detected. Extracting native audio via Whisper AI...");
+                
+                // Try to get Groq key from localStorage or use the backend's .env key
+                const groqKey = localStorage.getItem('vidbrief_groq_key') || '';
+                backendData = await fetchAudioTranscriptFromBackend(url, groqKey);
+                setProgress(30, "Audio transcribed successfully via Groq Whisper AI.");
+            } else {
+                throw transcriptErr; // Re-throw genuine errors
+            }
+        }
+        
+        setProgress(35, `Transcript acquired. Initializing ${provider} Intelligence...`);
         
         // Populate Transcript UI and save raw text for AI
         const rawTranscriptArr = backendData.transcript;
@@ -461,19 +556,57 @@ async function processVideoUrl(url) {
         document.getElementById('video-title').innerText = backendData.metadata.title;
         document.getElementById('channel-name').innerText = backendData.metadata.channel;
 
-        const maxContext = currentTranscriptText.substring(0, 30000); 
+        // Build a timestamped transcript string for AI analysis
+        const timestampedContext = rawTranscriptArr.map(t => {
+            const totalSecs = Math.floor(t.offset / 1000);
+            const m = Math.floor(totalSecs / 60);
+            const s = String(totalSecs % 60).padStart(2, '0');
+            return `[${m}:${s}] ${t.text}`;
+        }).join('\n').substring(0, 12000);
+
+        const maxContext = currentTranscriptText.substring(0, 12000); 
 
         // 2. Generate Summary
-        setProgress(50, "Synthesizing executive summary...");
-        const summaryMsg = [{ role: 'user', parts: [{ text: `Provide a comprehensive executive summary of the following video transcript. Make it flow well and capture the core essence of the video accurately.\n\nTranscript:\n${maxContext}` }] }];
+        setProgress(45, "Synthesizing executive summary...");
+        const summaryMsg = [{ role: 'user', parts: [{ text: `Provide a comprehensive executive summary of the following video transcript. The transcript may be in any language — always respond in the SAME language as the transcript. Make it flow well and capture the core essence of the video accurately.\n\nTranscript:\n${maxContext}` }] }];
         const summaryResult = await generateAIContent(null, summaryMsg);
         document.getElementById('summary-text').innerText = summaryResult;
         document.getElementById('summary-tease').innerText = "AI Generated Executive Summary complete.";
 
-        setProgress(75, "Extracting actionable highlights...");
+        // 3. Generate Chapters with Timestamps
+        setProgress(58, "Generating intelligent video chapters...");
+        const chaptersMsg = [{ role: 'user', parts: [{ text: `Analyze the following timestamped video transcript and generate 5-10 logical chapter markers. Each chapter should represent a distinct topic shift or segment of the video.\n\nReturn ONLY a JSON array of objects with "time" (in "M:SS" format) and "title" (short descriptive title) properties. Respond in the SAME language as the transcript.\n\nExample format: [{"time": "0:00", "title": "Introduction"}, {"time": "2:15", "title": "Main Topic"}]\n\nTimestamped Transcript:\n${timestampedContext}` }] }];
+        const chaptersResult = await generateAIContent(null, chaptersMsg);
+        
+        let chapText = chaptersResult.replace(/```json/g, '').replace(/```/g, '').trim();
+        let chaptersArray = [];
+        try {
+            chaptersArray = JSON.parse(chapText);
+        } catch(e) {
+            // Graceful degradation: parse line-by-line
+            chaptersArray = chapText.split('\n').filter(l => l.trim().length > 0).map(l => {
+                const match = l.match(/(\d+:\d+)\s*[-–:]?\s*(.+)/);
+                return match ? { time: match[1], title: match[2].trim() } : { time: '0:00', title: l.trim() };
+            });
+        }
+        
+        const chList = document.getElementById('chapters-list');
+        chList.innerHTML = '';
+        chaptersArray.forEach((ch, idx) => {
+            const li = document.createElement('li');
+            li.className = 'chapter-item';
+            li.innerHTML = `
+                <span class="chapter-number">${String(idx + 1).padStart(2, '0')}</span>
+                <span class="chapter-time">${ch.time}</span>
+                <span class="chapter-title">${ch.title}</span>
+            `;
+            chList.appendChild(li);
+        });
 
-        // 3. Generate Highlights
-        const highlightMsg = [{ role: "user", parts: [{ text: `Extract exactly 5 to 7 key bullet point takeaways from the following video transcript. Return ONLY a JSON array of strings representing each bullet point.\n\nTranscript:\n${maxContext}` }] }];
+        setProgress(72, "Extracting actionable highlights...");
+
+        // 4. Generate Highlights
+        const highlightMsg = [{ role: "user", parts: [{ text: `Extract exactly 5 to 7 key bullet point takeaways from the following video transcript. The transcript may be in any language — always respond in the SAME language as the transcript. Return ONLY a JSON array of strings representing each bullet point.\n\nTranscript:\n${maxContext}` }] }];
         const highlightResult = await generateAIContent(null, highlightMsg);
         
         let hlText = highlightResult.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -481,7 +614,6 @@ async function processVideoUrl(url) {
         try {
             highlightsArray = JSON.parse(hlText);
         } catch(e) {
-            // fallback if AI drops bad json
             highlightsArray = hlText.split('\n').filter(l => l.trim().length > 0).map(l => l.replace(/^[-\*0-9.]+\s*/, ''));
         }
         
@@ -493,13 +625,13 @@ async function processVideoUrl(url) {
             hlList.appendChild(li);
         });
 
-        setProgress(95, "Instantiating interactive chat context...");
+        setProgress(90, "Instantiating interactive chat context...");
 
-        // 4. Initialize Chat History
+        // 5. Initialize Chat History
         chatHistory = [
              {
                  role: "user",
-                 parts: [{ text: `I am going to ask you questions about a video. Here is the transcript of the video as context:\n\n${maxContext}` }],
+                 parts: [{ text: `I am going to ask you questions about a video. Here is the transcript of the video as context. The transcript may be in any language — please always respond in the SAME language as the transcript.\n\n${maxContext}` }],
              },
              {
                  role: "assistant",
@@ -517,6 +649,9 @@ async function processVideoUrl(url) {
         errorDiv.id = 'error-message';
         errorDiv.className = 'error-banner';
         errorDiv.innerText = `Error: ${err.message}`;
+        errorDiv.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+        errorDiv.style.color = 'var(--error-color)';
+        errorDiv.style.border = '1px solid rgba(239, 68, 68, 0.2)';
         urlForm.parentNode.insertBefore(errorDiv, urlForm);
         showView('landing');
     }
@@ -646,5 +781,17 @@ document.addEventListener('click', (e) => {
   if (e.target.classList.contains('suggestion-chip')) {
     chatInput.value = e.target.innerText;
     chatForm.dispatchEvent(new Event('submit'));
+  }
+});
+
+// --- Card Spotlight Effect (Mouse Tracking) ---
+document.addEventListener('mousemove', (e) => {
+  const cards = document.querySelectorAll('.card-spotlight');
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    card.style.setProperty('--x', `${x}px`);
+    card.style.setProperty('--y', `${y}px`);
   }
 });
