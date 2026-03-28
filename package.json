@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "concurrently --kill-others -n frontend,api -c cyan,magenta \"vite\" \"node api/index.js\"",
-    "dev": "vite",
+    "dev": "concurrently --kill-others -n frontend,api -c cyan,magenta \"vite\" \"node api/index.js\"",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",

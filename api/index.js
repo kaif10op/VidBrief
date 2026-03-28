@@ -7,6 +7,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import OpenAI, { toFile } from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleAIFileManager } from '@google/generative-ai/server';
 // Import other fallback libraries if needed
 
 dotenv.config();
@@ -190,7 +192,7 @@ app.post('/api/transcript', async (req, res) => {
         }
         
         // If all strategies fail, the video truly has no captions available
-        return res.status(404).json({ success: false, code: 'NO_TRANSCRIPT_AVAILABLE', error: 'This video does not have any captions or transcripts available on YouTube.' });
+        return res.status(200).json({ success: false, code: 'NO_TRANSCRIPT_AVAILABLE', error: 'This video does not have any captions or transcripts available on YouTube.' });
 
     } catch (error) {
         console.error('Final Transcript error:', error.message);
@@ -266,7 +268,7 @@ app.post('/api/audio-transcript', async (req, res) => {
     const { url } = req.body;
     const whisperKey = req.body.whisperKey || process.env.GROQ_API_KEY;
     if (!url) return res.status(400).json({ error: 'YouTube URL is required' });
-    if (!whisperKey) return res.status(400).json({ error: 'Groq API Key is required. Set GROQ_API_KEY in .env or pass a key from client settings.' });
+    if (!whisperKey && !process.env.GOOGLE_AI_KEY) return res.status(400).json({ error: 'At least one Audio API Key (Groq or Gemini) is required.' });
 
     const videoId = extractVideoId(url);
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
@@ -297,35 +299,68 @@ app.post('/api/audio-transcript', async (req, res) => {
 
         console.log(`[Audio API] Downloaded to ${outputFilename}. Ping Groq Whisper...`);
 
-        // 2. Read file to Buffer and prep FormData using native OpenAI SDK (Groq Compatible)
-        const openai = new OpenAI({
-            baseURL: "https://api.groq.com/openai/v1",
-            apiKey: whisperKey
-        });
+        let transcript;
 
-        // We force the extension to .mp4 to bypass Groq WebM proxy restrictions
-        const fileObj = await toFile(fs.createReadStream(outputFilename), 'audio.mp4');
+        try {
+            if (!whisperKey) throw new Error("No Groq Whisper key provided.");
+            // 2. Read file to Buffer and prep FormData using native OpenAI SDK (Groq Compatible)
+            const openai = new OpenAI({
+                baseURL: "https://api.groq.com/openai/v1",
+                apiKey: whisperKey
+            });
 
-        const whisperData = await openai.audio.transcriptions.create({
-            file: fileObj,
-            model: "whisper-large-v3-turbo",
-            response_format: "verbose_json",
-            prompt: "Please transcribe the following audio carefully."
-        });
+            // We force the extension to .mp4 to bypass Groq WebM proxy restrictions
+            const fileObj = await toFile(fs.createReadStream(outputFilename), 'audio.mp4');
+
+            const whisperData = await openai.audio.transcriptions.create({
+                file: fileObj,
+                model: "whisper-large-v3-turbo",
+                response_format: "verbose_json",
+                prompt: "Please transcribe the following audio carefully."
+            });
+
+            // 5. Transform Groq segments into standard transcript app format
+            transcript = (whisperData.segments || []).map(seg => ({
+                text: seg.text.trim(),
+                offset: Math.floor(seg.start * 1000),
+                duration: Math.floor((seg.end - seg.start) * 1000)
+            }));
+
+            if (transcript.length === 0) {
+                 throw new Error('Whisper returned empty transcription.');
+            }
+        } catch (groqErr) {
+            console.warn(`[Groq Audio Fail] ${groqErr.message}. Falling back to Gemini 1.5 Flash...`);
+            
+            const geminiKey = process.env.GOOGLE_AI_KEY;
+            if (!geminiKey) throw new Error(`Groq failed and no Google AI key available for fallback. Groq Error: ${groqErr.message}`);
+
+            const fileManager = new GoogleAIFileManager(geminiKey);
+            const uploadResult = await fileManager.uploadFile(outputFilename, { mimeType: "audio/mp4", displayName: "Audio Fallback" });
+            
+            const genAI = new GoogleGenerativeAI(geminiKey);
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            
+            const result = await model.generateContent([
+                "Transcribe this audio exactly. Do not add any conversational filler, just the exact words spoken in the audio.",
+                { fileData: { fileUri: uploadResult.file.uri, mimeType: uploadResult.file.mimeType } }
+            ]);
+            
+            const text = result.response.text();
+            
+            try { await fileManager.deleteFile(uploadResult.file.name); } catch(delErr) {}
+            
+            if (!text || text.trim() === '') throw new Error("Gemini returned empty transcription.");
+            
+            transcript = [{
+                text: text.trim(),
+                offset: 0,
+                duration: 60000 // Approximate dummy duration
+            }];
+        }
 
         // 3. Cleanup temp file instantly
         try { fs.unlinkSync(outputFilename); } catch (e) { console.error("Cleanup error:", e); }
-        
-        // 5. Transform Groq segments into standard transcript app format
-        const transcript = (whisperData.segments || []).map(seg => ({
-            text: seg.text.trim(),
-            offset: Math.floor(seg.start * 1000),
-            duration: Math.floor((seg.end - seg.start) * 1000)
-        }));
-
-        if (transcript.length === 0) {
-             throw new Error('Whisper returned empty transcription.');
-        }
 
         res.json({ success: true, transcript, metadata: await fetchMetadata(videoId), isWhisperFallback: true });
 

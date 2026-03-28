@@ -127,16 +127,17 @@ async function loadSettings() {
                         .from('user_configs')
                         .select('*')
                         .eq('id', currentUser.id)
-                        .single();
+                        .limit(1);
 
-                    if (data) {
-                        if (providerSelect && data.provider) {
-                            providerSelect.value = data.provider;
+                    if (data && data.length > 0) {
+                        const dbConfig = data[0];
+                        if (providerSelect && dbConfig.provider) {
+                            providerSelect.value = dbConfig.provider;
                         }
                         Object.keys(keys).forEach(k => {
-                            if (data[`${k}_key`] && keys[k]) {
-                                keys[k].value = data[`${k}_key`];
-                                localStorage.setItem(`vidbrief_${k}_key`, data[`${k}_key`]);
+                            if (dbConfig[`${k}_key`] && keys[k]) {
+                                keys[k].value = dbConfig[`${k}_key`];
+                                localStorage.setItem(`vidbrief_${k}_key`, dbConfig[`${k}_key`]);
                             }
                         });
                     }
