@@ -18,6 +18,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// --- Timeout Helper ---
+function withTimeout(promise, ms, label = 'Operation') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+        )
+    ]);
+}
+
 // Expose API keys to the frontend securely
 app.get('/api/config', (req, res) => {
     try {
@@ -49,7 +59,7 @@ function extractVideoId(url) {
     return null;
 }
 
-// Optimized Transcript Fetching for Serverless (Pure JS)
+// Optimized Transcript Fetching with Timeouts
 app.post('/api/transcript', async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'YouTube URL is required' });
@@ -57,21 +67,26 @@ app.post('/api/transcript', async (req, res) => {
     const videoId = extractVideoId(url);
     if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
 
-    console.log(`[Vercel API] Fetching transcript for ${videoId}...`);
+    console.log(`[API] Fetching transcript for ${videoId}...`);
+    const startTime = Date.now();
 
     try {
-        // Strategy 1: youtube-transcript (Library)
+        // Strategy 1: youtube-transcript (Library) — 15s timeout
         try {
-            const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+            console.log(`[Strategy 1] youtube-transcript library...`);
+            const transcript = await withTimeout(
+                YoutubeTranscript.fetchTranscript(videoId),
+                15000,
+                'Strategy 1 (youtube-transcript)'
+            );
             if (transcript && transcript.length > 0) {
-                // We still need metadata (title, channel, thumbnails)
-                // We'll use a basic metadata fetch strategy
                 let metadata = { title: "YouTube Video", channel: "YouTube Channel", thumbnail: `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, views: "N/A" };
                 try {
-                    const meta = await fetchMetadata(videoId);
+                    const meta = await withTimeout(fetchMetadata(videoId), 10000, 'Metadata fetch');
                     metadata = { ...metadata, ...meta };
-                } catch(e) {}
+                } catch(e) { console.warn("[Metadata] Skipped:", e.message); }
 
+                console.log(`[Strategy 1] SUCCESS in ${Date.now() - startTime}ms — ${transcript.length} segments`);
                 return res.json({
                     success: true,
                     transcript: transcript.map(t => ({
@@ -83,32 +98,41 @@ app.post('/api/transcript', async (req, res) => {
                 });
             }
         } catch (e) {
-            console.error("[Strategy 1 Fail]", e.message);
+            console.warn(`[Strategy 1 Fail] ${e.message} (${Date.now() - startTime}ms)`);
         }
 
-        // Strategy 2: Manual Scraping (Ported from server.js)
+        // Strategy 2: Manual Scraping — 15s timeout
         try {
-            const result = await fetchTranscriptFromHTML(videoId);
+            console.log(`[Strategy 2] Manual HTML scraping...`);
+            const result = await withTimeout(
+                fetchTranscriptFromHTML(videoId),
+                15000,
+                'Strategy 2 (HTML scraping)'
+            );
             if (result && result.transcript.length > 0) {
+                console.log(`[Strategy 2] SUCCESS in ${Date.now() - startTime}ms — ${result.transcript.length} segments`);
                 return res.json({ success: true, ...result });
             }
         } catch (e) {
-            console.error("[Strategy 2 Fail]", e.message);
+            console.warn(`[Strategy 2 Fail] ${e.message} (${Date.now() - startTime}ms)`);
         }
         
-        // Strategy 3: yt-dlp subtitle extraction (bypasses YouTube bot protection)
+        // Strategy 3: yt-dlp subtitle extraction — 30s timeout
         try {
-            console.log(`[Strategy 3] Trying yt-dlp subtitle extraction for ${videoId}...`);
-            const info = await youtubedl(url, {
-                dumpJson: true,
-                noCheckCertificates: true,
-                noWarnings: true
-            });
+            console.log(`[Strategy 3] yt-dlp subtitle extraction...`);
+            const info = await withTimeout(
+                youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
+                    dumpJson: true,
+                    noCheckCertificates: true,
+                    noWarnings: true
+                }),
+                30000,
+                'Strategy 3 (yt-dlp)'
+            );
             
             const subs = info.subtitles || {};
             const autoCaptions = info.automatic_captions || {};
             
-            // Pick best subtitle track: prefer manual English > manual any > auto English > auto any
             let subUrl = null;
             let subLang = null;
             
@@ -121,11 +145,8 @@ app.post('/api/transcript', async (req, res) => {
                 return null;
             };
             
-            // Try manual subs first, then auto-captions
-            // Priority: Manual English > Auto English > Manual any > Auto any
             const englishVariants = ['en', 'en-US', 'en-GB', 'en-orig'];
             
-            // Phase 1: Try English first across all sources
             for (const source of [subs, autoCaptions]) {
                 if (Object.keys(source).length === 0) continue;
                 for (const lang of englishVariants) {
@@ -135,7 +156,6 @@ app.post('/api/transcript', async (req, res) => {
                 if (subUrl) break;
             }
             
-            // Phase 2: If no English found, take the first available language
             if (!subUrl) {
                 for (const source of [subs, autoCaptions]) {
                     if (Object.keys(source).length === 0) continue;
@@ -147,14 +167,17 @@ app.post('/api/transcript', async (req, res) => {
             
             if (subUrl) {
                 console.log(`[Strategy 3] Found ${subLang} subtitles. Downloading...`);
-                const subRes = await fetch(subUrl, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                });
+                const subRes = await withTimeout(
+                    fetch(subUrl, {
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    }),
+                    10000,
+                    'Subtitle download'
+                );
                 const subData = await subRes.text();
                 
                 let segments = [];
                 
-                // Try JSON3 format first
                 try {
                     const json = JSON.parse(subData);
                     if (json.events) {
@@ -168,7 +191,6 @@ app.post('/api/transcript', async (req, res) => {
                             .filter(s => s.text.length > 0);
                     }
                 } catch(jsonErr) {
-                    // Fallback: parse as XML/SRV1
                     const regex = /<text start="([\d.]+)" dur="([\d.]+)".*?>(.*?)<\/text>/g;
                     let match;
                     while ((match = regex.exec(subData)) !== null) {
@@ -181,17 +203,19 @@ app.post('/api/transcript', async (req, res) => {
                 }
                 
                 if (segments.length > 0) {
-                    console.log(`[Strategy 3] Got ${segments.length} segments via yt-dlp subtitles (lang: ${subLang}).`);
-                    return res.json({ success: true, transcript: segments, language: subLang, metadata: await fetchMetadata(videoId) });
+                    console.log(`[Strategy 3] SUCCESS in ${Date.now() - startTime}ms — ${segments.length} segments (lang: ${subLang})`);
+                    let metadata = { title: info.title || "YouTube Video", channel: info.uploader || "YouTube Channel", thumbnail: info.thumbnail || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, views: info.view_count ? info.view_count.toLocaleString() : "N/A" };
+                    return res.json({ success: true, transcript: segments, language: subLang, metadata });
                 }
             }
             
             console.log(`[Strategy 3] No usable subtitles found via yt-dlp.`);
         } catch (e) {
-            console.error("[Strategy 3 Fail]", e.message);
+            console.warn(`[Strategy 3 Fail] ${e.message} (${Date.now() - startTime}ms)`);
         }
         
-        // If all strategies fail, the video truly has no captions available
+        // If all strategies fail
+        console.log(`[API] All transcript strategies failed for ${videoId} in ${Date.now() - startTime}ms`);
         return res.status(200).json({ success: false, code: 'NO_TRANSCRIPT_AVAILABLE', error: 'This video does not have any captions or transcripts available on YouTube.' });
 
     } catch (error) {
@@ -276,50 +300,55 @@ app.post('/api/audio-transcript', async (req, res) => {
     console.log(`[Audio API] Extracting audio stream for ${videoId}...`);
 
     try {
-        // 1. Download audio file via yt-dlp
+        // 1. Download audio file via yt-dlp — 60s timeout
         const tmpDir = os.tmpdir();
         const baseName = `audio_${videoId}_${Date.now()}`;
         const outputTemplate = path.join(tmpDir, `${baseName}.%(ext)s`);
         
-        await youtubedl(url, {
-            format: 'bestaudio',
-            output: outputTemplate,
-            noCheckCertificates: true,
-            maxFilesize: '24m',
-            noWarnings: true
-        });
+        await withTimeout(
+            youtubedl(url, {
+                format: 'bestaudio[filesize<25M]/bestaudio',
+                output: outputTemplate,
+                noCheckCertificates: true,
+                maxFilesize: '24m',
+                noWarnings: true
+            }),
+            60000,
+            'Audio download'
+        );
 
-        // Find the actual file yt-dlp created (it often leaves it as .part if ffmpeg is missing)
+        // Find the actual file yt-dlp created
         const files = fs.readdirSync(tmpDir);
         const actualFile = files.find(f => f.startsWith(baseName));
-        if (!actualFile) throw new Error("Failed to neatly download audio file from YouTube (video may be too large or restricted).");
+        if (!actualFile) throw new Error("Failed to download audio file from YouTube (video may be too large or restricted).");
         
         const outputFilename = path.join(tmpDir, actualFile);
         const ext = path.extname(actualFile).replace('.', '') || 'webm';
 
-        console.log(`[Audio API] Downloaded to ${outputFilename}. Ping Groq Whisper...`);
+        console.log(`[Audio API] Downloaded to ${outputFilename}. Trying Groq Whisper...`);
 
         let transcript;
 
         try {
             if (!whisperKey) throw new Error("No Groq Whisper key provided.");
-            // 2. Read file to Buffer and prep FormData using native OpenAI SDK (Groq Compatible)
             const openai = new OpenAI({
                 baseURL: "https://api.groq.com/openai/v1",
                 apiKey: whisperKey
             });
 
-            // We force the extension to .mp4 to bypass Groq WebM proxy restrictions
             const fileObj = await toFile(fs.createReadStream(outputFilename), 'audio.mp4');
 
-            const whisperData = await openai.audio.transcriptions.create({
-                file: fileObj,
-                model: "whisper-large-v3-turbo",
-                response_format: "verbose_json",
-                prompt: "Please transcribe the following audio carefully."
-            });
+            const whisperData = await withTimeout(
+                openai.audio.transcriptions.create({
+                    file: fileObj,
+                    model: "whisper-large-v3-turbo",
+                    response_format: "verbose_json",
+                    prompt: "Please transcribe the following audio carefully."
+                }),
+                45000,
+                'Groq Whisper transcription'
+            );
 
-            // 5. Transform Groq segments into standard transcript app format
             transcript = (whisperData.segments || []).map(seg => ({
                 text: seg.text.trim(),
                 offset: Math.floor(seg.start * 1000),
@@ -336,15 +365,23 @@ app.post('/api/audio-transcript', async (req, res) => {
             if (!geminiKey) throw new Error(`Groq failed and no Google AI key available for fallback. Groq Error: ${groqErr.message}`);
 
             const fileManager = new GoogleAIFileManager(geminiKey);
-            const uploadResult = await fileManager.uploadFile(outputFilename, { mimeType: "audio/mp4", displayName: "Audio Fallback" });
+            const uploadResult = await withTimeout(
+                fileManager.uploadFile(outputFilename, { mimeType: "audio/mp4", displayName: "Audio Fallback" }),
+                30000,
+                'Gemini file upload'
+            );
             
             const genAI = new GoogleGenerativeAI(geminiKey);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
             
-            const result = await model.generateContent([
-                "Transcribe this audio exactly. Do not add any conversational filler, just the exact words spoken in the audio.",
-                { fileData: { fileUri: uploadResult.file.uri, mimeType: uploadResult.file.mimeType } }
-            ]);
+            const result = await withTimeout(
+                model.generateContent([
+                    "Transcribe this audio exactly. Do not add any conversational filler, just the exact words spoken in the audio.",
+                    { fileData: { fileUri: uploadResult.file.uri, mimeType: uploadResult.file.mimeType } }
+                ]),
+                45000,
+                'Gemini transcription'
+            );
             
             const text = result.response.text();
             
@@ -355,11 +392,11 @@ app.post('/api/audio-transcript', async (req, res) => {
             transcript = [{
                 text: text.trim(),
                 offset: 0,
-                duration: 60000 // Approximate dummy duration
+                duration: 60000
             }];
         }
 
-        // 3. Cleanup temp file instantly
+        // Cleanup temp file
         try { fs.unlinkSync(outputFilename); } catch (e) { console.error("Cleanup error:", e); }
 
         res.json({ success: true, transcript, metadata: await fetchMetadata(videoId), isWhisperFallback: true });
@@ -447,7 +484,11 @@ app.post('/api/generate', async (req, res) => {
 
             try {
                 console.log(`[AI] Attempting generation via ${provider}...`);
-                const result = await executeAIRequestServer(provider, apiKey, systemPrompt, sizedMessages);
+                const result = await withTimeout(
+                    executeAIRequestServer(provider, apiKey, systemPrompt, sizedMessages),
+                    30000,
+                    `AI generation (${provider})`
+                );
                 return res.json({ success: true, result, provider });
             } catch (err) {
                 console.warn(`[AI] Provider ${provider} failed: ${err.message}`);

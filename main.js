@@ -301,14 +301,22 @@ function showView(viewName) {
   }, 10);
 }
 
+// --- Timeout Helper ---
+function fetchWithTimeout(url, options, timeoutMs = 90000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: controller.signal })
+        .finally(() => clearTimeout(timeout));
+}
+
 // --- Local Backend Fetch Logic ---
 async function fetchTranscriptFromBackend(url) {
     try {
-        const response = await fetch('/api/transcript', {
+        const response = await fetchWithTimeout('/api/transcript', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
-        });
+        }, 90000); // 90s timeout for transcript strategies
         const data = await response.json();
         
         if (!data.success) {
@@ -318,17 +326,20 @@ async function fetchTranscriptFromBackend(url) {
         }
         return data; 
     } catch (err) {
+        if (err.name === 'AbortError') {
+            throw new Error('Transcript fetch timed out. The video may be unavailable or YouTube is rate-limiting requests. Please try again.');
+        }
         throw err;
     }
 }
 
 async function fetchAudioTranscriptFromBackend(url, whisperKey) {
     try {
-        const response = await fetch('/api/audio-transcript', {
+        const response = await fetchWithTimeout('/api/audio-transcript', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url, whisperKey })
-        });
+        }, 120000); // 120s timeout for audio download + transcription
         const data = await response.json();
         
         if (!data.success) {
@@ -336,6 +347,9 @@ async function fetchAudioTranscriptFromBackend(url, whisperKey) {
         }
         return data; 
     } catch (err) {
+        if (err.name === 'AbortError') {
+            throw new Error('Audio transcription timed out. The video may be too long or the service is unavailable. Please try again.');
+        }
         throw err;
     }
 }
